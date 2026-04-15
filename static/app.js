@@ -58,54 +58,149 @@ function getPieceCell(player, piece) {
   return [7, 7];
 }
 
-// ── Dado 3D ───────────────────────────────────────────────────────────────────
-// Rotaciones finales para mostrar cada cara al frente
-const FACE_ROTATIONS = {
-  1: [0,    0,   0],
-  2: [0,   -90,  0],
-  3: [-90,  0,   0],
-  4: [90,   0,   0],
-  5: [0,    90,  0],
-  6: [0,   180,  0],
+// ── Dado (Canvas 2D) ──────────────────────────────────────────────────────────
+// Posición de los puntos para cada cara [cx%, cy%] dentro del cuadrado 0–1
+const DOT_POS = {
+  1: [[0.50, 0.50]],
+  2: [[0.28, 0.28], [0.72, 0.72]],
+  3: [[0.28, 0.28], [0.50, 0.50], [0.72, 0.72]],
+  4: [[0.28, 0.28], [0.72, 0.28], [0.28, 0.72], [0.72, 0.72]],
+  5: [[0.28, 0.28], [0.72, 0.28], [0.50, 0.50], [0.28, 0.72], [0.72, 0.72]],
+  6: [[0.28, 0.22], [0.72, 0.22], [0.28, 0.50], [0.72, 0.50], [0.28, 0.78], [0.72, 0.78]],
 };
 
-function showDice3D(result, callback) {
-  const overlay = document.getElementById('dice-overlay');
-  const cube    = document.getElementById('dice-3d');
-  const label   = document.getElementById('dice-result-label');
-  const diceEmojis = ['⚀','⚁','⚂','⚃','⚄','⚅'];
+function drawDiceFace(ctx, n, size, scale) {
+  ctx.clearRect(0, 0, size, size);
+  ctx.save();
+  ctx.translate(size / 2, size / 2);
+  ctx.scale(scale, scale);
+  ctx.translate(-size / 2, -size / 2);
 
-  // 1. Reset instantáneo sin transición
-  cube.style.transition = 'none';
-  cube.style.transform  = 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)';
+  const r = size * 0.14;
+  // Sombra exterior
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetY = 6;
+
+  // Fondo dado
+  const grad = ctx.createLinearGradient(0, 0, size, size);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(1, '#d8d8d8');
+  roundRect(ctx, 4, 4, size - 8, size - 8, r);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = '#bbbbbb';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Borde interior brillante
+  roundRect(ctx, 10, 10, size - 20, size - 20, r * 0.7);
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Puntos
+  const dr = size * 0.085;
+  for (const [px, py] of DOT_POS[n]) {
+    const x = px * size, y = py * size;
+    // Sombra del punto
+    ctx.beginPath();
+    ctx.arc(x + 1.5, y + 1.5, dr, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fill();
+    // Punto
+    const dg = ctx.createRadialGradient(x - dr * 0.3, y - dr * 0.35, dr * 0.05, x, y, dr);
+    dg.addColorStop(0, '#555');
+    dg.addColorStop(1, '#111');
+    ctx.beginPath();
+    ctx.arc(x, y, dr, 0, Math.PI * 2);
+    ctx.fillStyle = dg;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+function showDice3D(result, callback) {
+  const overlay  = document.getElementById('dice-overlay');
+  const canvas   = document.getElementById('dice-canvas');
+  const label    = document.getElementById('dice-result-label');
+  const diceEmojis = ['⚀','⚁','⚂','⚃','⚄','⚅'];
+  const ctx      = canvas.getContext('2d');
+  const SIZE     = canvas.width;  // 160
+
   label.classList.remove('show');
   label.textContent = '';
   overlay.classList.remove('hidden');
 
-  // 2. Forzar reflow para que el reset se aplique
-  cube.getBoundingClientRect();
+  // Parámetros de animación
+  const SPIN_MS   = 1100;   // duración del giro rápido
+  const startTime = performance.now();
+  let   rafId;
+  let   currentFace = 1;
 
-  // 3. Una sola transición: muchas vueltas + aterrizaje en la cara correcta
-  const [fx, fy] = FACE_ROTATIONS[result];
-  const totalX = 5 * 360 + fx;   // 5 vueltas + cara final
-  const totalY = 7 * 360 + fy;
-  const totalZ = 2 * 360;
+  function animate(now) {
+    const elapsed  = now - startTime;
+    const progress = Math.min(elapsed / SPIN_MS, 1);   // 0 → 1
 
-  cube.style.transition = 'transform 1.6s cubic-bezier(0.23, 1, 0.32, 1)';
-  cube.style.transform  = `rotateX(${totalX}deg) rotateY(${totalY}deg) rotateZ(${totalZ}deg)`;
+    // Intervalo de cambio de cara: rápido (2 frames) → lento (20 frames)
+    const changeEvery = 2 + Math.floor(progress * 18);
+    const totalFrame  = Math.floor(elapsed / (1000 / 60));
+    if (totalFrame % changeEvery === 0) {
+      currentFace = Math.floor(Math.random() * 6) + 1;
+    }
 
-  // 4. Mostrar resultado cuando casi termina
-  setTimeout(() => {
-    label.textContent = `${diceEmojis[result-1]}  ${result}`;
-    label.classList.add('show');
-  }, 1200);
+    // En el último 10% siempre muestra el resultado final
+    const face = progress > 0.90 ? result : currentFace;
 
-  // 5. Cerrar overlay y continuar juego
-  setTimeout(() => {
-    overlay.classList.add('hidden');
-    label.classList.remove('show');
-    callback();
-  }, 2000);
+    // Escala: efecto de "rebote" al aterrizar
+    let scale = 1;
+    if (progress > 0.88) {
+      const t = (progress - 0.88) / 0.12;  // 0→1
+      scale = 1 + 0.18 * Math.sin(t * Math.PI);  // sube y baja
+    }
+
+    // Pequeña rotación 2D para simular giro (no requiere preserve-3d)
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    const tilt = (1 - progress) * 15 * Math.sin(elapsed * 0.025);
+    ctx.save();
+    ctx.translate(SIZE / 2, SIZE / 2);
+    ctx.rotate(tilt * Math.PI / 180);
+    ctx.translate(-SIZE / 2, -SIZE / 2);
+    drawDiceFace(ctx, face, SIZE, scale);
+    ctx.restore();
+
+    if (progress < 1) {
+      rafId = requestAnimationFrame(animate);
+    } else {
+      // Cara final fija + label
+      drawDiceFace(ctx, result, SIZE, 1);
+      label.textContent = `${diceEmojis[result - 1]}  ${result}`;
+      label.classList.add('show');
+
+      setTimeout(() => {
+        overlay.classList.add('hidden');
+        label.classList.remove('show');
+        callback();
+      }, 900);
+    }
+  }
+
+  rafId = requestAnimationFrame(animate);
 }
 
 // ── Animación de movimiento de fichas ─────────────────────────────────────────

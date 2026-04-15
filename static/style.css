@@ -261,7 +261,7 @@ html, body {
 }
 .toast.hidden { display: none; }
 
-/* ── DADO 3D ─────────────────────────────────────────────────────────────── */
+/* ── DADO OVERLAY ───────────────────────────────────────────────────────── */
 .dice-overlay {
   position: fixed;
   inset: 0;
@@ -276,51 +276,11 @@ html, body {
 }
 .dice-overlay.hidden { display: none; }
 
-.dice-scene {
-  perspective: 500px;
-  width: 110px;
-  height: 110px;
+#dice-canvas {
+  display: block;
+  border-radius: 20px;
+  transition: transform 0.15s;
 }
-
-.dice {
-  width: 110px;
-  height: 110px;
-  position: relative;
-  transform-style: preserve-3d;
-  /* La transición se controla desde JS */
-}
-
-.face {
-  position: absolute;
-  width: 110px;
-  height: 110px;
-  background: linear-gradient(145deg, #ffffff, #e8e8e8);
-  border-radius: 18px;
-  border: 2px solid #ccc;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  padding: 14px;
-  gap: 5px;
-  box-shadow: 0 0 20px rgba(255,255,255,0.15), inset 0 2px 4px rgba(255,255,255,0.8);
-}
-
-.face.front  { transform: rotateY(  0deg) translateZ(55px); }
-.face.back   { transform: rotateY(180deg) translateZ(55px); }
-.face.right  { transform: rotateY( 90deg) translateZ(55px); }
-.face.left   { transform: rotateY(-90deg) translateZ(55px); }
-.face.top    { transform: rotateX( 90deg) translateZ(55px); }
-.face.bottom { transform: rotateX(-90deg) translateZ(55px); }
-
-.dot {
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(circle at 35% 35%, #444, #111);
-  border-radius: 50%;
-  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
-}
-
-/* La animación ahora es 100% JS via CSS transition — no se necesita @keyframes */
 
 .dice-result-label {
   font-size: 28px;
@@ -344,10 +304,4 @@ html, body {
 @keyframes pulse {
   0%, 100% { box-shadow: 0 4px 20px rgba(230,126,0,0.4); }
   50%       { box-shadow: 0 4px 35px rgba(230,126,0,0.8); }
-}
-
-/* Pieza brillando durante animación */
-@keyframes pieceGlow {
-  0%, 100% { filter: brightness(1); }
-  50%       { filter: brightness(1.6) drop-shadow(0 0 6px white); }
 }
