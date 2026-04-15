@@ -136,6 +136,9 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 function showDice3D(result, callback) {
+  // Guardia: si el resultado es inválido (ej. sin movimientos posibles), saltar animación
+  if (!result || result < 1 || result > 6) { callback(); return; }
+
   const overlay  = document.getElementById('dice-overlay');
   const canvas   = document.getElementById('dice-canvas');
   const label    = document.getElementById('dice-result-label');
@@ -594,7 +597,9 @@ async function rollDice() {
   btn.disabled = true;
   try {
     const data = await api('POST', `/games/${currentGameId}/roll`, {user_id: ME.id});
-    showDice3D(data.dice_value, () => {
+    // dice_value puede ser null si advance_turn ya lo limpió (sin movimientos posibles)
+    const rolledValue = data.dice_value ?? data.dice;
+    showDice3D(rolledValue, () => {
       gameState = data;
       updateGameUI();
       if (data.note) toast(data.note);
