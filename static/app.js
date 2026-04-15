@@ -75,41 +75,37 @@ function showDice3D(result, callback) {
   const label   = document.getElementById('dice-result-label');
   const diceEmojis = ['⚀','⚁','⚂','⚃','⚄','⚅'];
 
-  // Resetear sin transición
+  // 1. Reset instantáneo sin transición
   cube.style.transition = 'none';
   cube.style.transform  = 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)';
   label.classList.remove('show');
   label.textContent = '';
   overlay.classList.remove('hidden');
 
-  // Forzar reflow
-  void cube.offsetWidth;
+  // 2. Forzar reflow para que el reset se aplique
+  cube.getBoundingClientRect();
 
-  // Fase 1: animación CSS de giro rápido
-  cube.classList.add('rolling');
+  // 3. Una sola transición: muchas vueltas + aterrizaje en la cara correcta
+  const [fx, fy] = FACE_ROTATIONS[result];
+  const totalX = 5 * 360 + fx;   // 5 vueltas + cara final
+  const totalY = 7 * 360 + fy;
+  const totalZ = 2 * 360;
 
+  cube.style.transition = 'transform 1.6s cubic-bezier(0.23, 1, 0.32, 1)';
+  cube.style.transform  = `rotateX(${totalX}deg) rotateY(${totalY}deg) rotateZ(${totalZ}deg)`;
+
+  // 4. Mostrar resultado cuando casi termina
   setTimeout(() => {
-    cube.classList.remove('rolling');
-    // Fase 2: aterrizaje suave en la cara correcta
-    const [rx, ry, rz] = FACE_ROTATIONS[result];
-    const spins = 3;
-    cube.style.transition = 'transform 0.6s cubic-bezier(0.25, 1.5, 0.5, 1)';
-    cube.style.transform  = `rotateX(${rx + spins*360}deg) rotateY(${ry + spins*360}deg) rotateZ(${rz}deg)`;
+    label.textContent = `${diceEmojis[result-1]}  ${result}`;
+    label.classList.add('show');
+  }, 1200);
 
-    // Mostrar etiqueta de resultado
-    setTimeout(() => {
-      label.textContent = `${diceEmojis[result-1]}  ${result}`;
-      label.classList.add('show');
-    }, 400);
-
-    // Ocultar overlay y continuar
-    setTimeout(() => {
-      overlay.classList.add('hidden');
-      label.classList.remove('show');
-      callback();
-    }, 1300);
-
-  }, 950); // duración de la animación CSS
+  // 5. Cerrar overlay y continuar juego
+  setTimeout(() => {
+    overlay.classList.add('hidden');
+    label.classList.remove('show');
+    callback();
+  }, 2000);
 }
 
 // ── Animación de movimiento de fichas ─────────────────────────────────────────
@@ -499,19 +495,28 @@ function updateGameUI() {
 // ── Tirar dado ────────────────────────────────────────────────────────────────
 async function rollDice() {
   if (animating) return;
-  document.getElementById('btn-roll').disabled = true;
+  const btn = document.getElementById('btn-roll');
+  btn.disabled = true;
   try {
     const data = await api('POST', `/games/${currentGameId}/roll`, {user_id: ME.id});
-    // Primero mostrar animación del dado, luego actualizar estado
     showDice3D(data.dice_value, () => {
       gameState = data;
       updateGameUI();
       if (data.note) toast(data.note);
-      document.getElementById('btn-roll').disabled = false;
+      btn.disabled = false;
     });
+    // Safety: si en 3s no se ejecutó el callback, forzar
+    setTimeout(() => {
+      if (btn.disabled) {
+        gameState = data;
+        updateGameUI();
+        btn.disabled = false;
+        document.getElementById('dice-overlay').classList.add('hidden');
+      }
+    }, 3000);
   } catch(e) {
     toast(e.message);
-    document.getElementById('btn-roll').disabled = false;
+    btn.disabled = false;
   }
 }
 

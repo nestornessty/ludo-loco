@@ -320,20 +320,7 @@ html, body {
   box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
 }
 
-/* Animación de giro rápido */
-@keyframes diceShake {
-  0%   { transform: rotateX(0deg)   rotateY(0deg)   rotateZ(0deg); }
-  15%  { transform: rotateX(180deg) rotateY(120deg)  rotateZ(60deg); }
-  30%  { transform: rotateX(360deg) rotateY(240deg)  rotateZ(120deg); }
-  50%  { transform: rotateX(540deg) rotateY(420deg)  rotateZ(200deg); }
-  70%  { transform: rotateX(720deg) rotateY(600deg)  rotateZ(300deg); }
-  85%  { transform: rotateX(810deg) rotateY(690deg)  rotateZ(340deg); }
-  100% { transform: rotateX(900deg) rotateY(780deg)  rotateZ(360deg); }
-}
-
-.dice.rolling {
-  animation: diceShake 0.9s cubic-bezier(0.36, 0.07, 0.19, 0.97);
-}
+/* La animación ahora es 100% JS via CSS transition — no se necesita @keyframes */
 
 .dice-result-label {
   font-size: 28px;
