@@ -390,8 +390,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if state.phase != 'waiting':
             await query.answer('La partida ya comenzó.', show_alert=True)
             return
-        if query.from_user.id != state.player_ids[0]:
-            await query.answer('Solo el creador de la sala puede iniciar.', show_alert=True)
+        if query.from_user.id not in state.player_ids:
+            await query.answer('Solo los jugadores de la sala pueden iniciar.', show_alert=True)
             return
         if len(state.player_ids) < 2:
             await query.answer('Necesitas al menos 2 jugadores.', show_alert=True)
