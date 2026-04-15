@@ -164,7 +164,7 @@ async def cmd_nueva(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state.player_names.append(user.first_name)
     active_games[game_id] = state
 
-    await update.message.reply_text(
+    msg = await update.message.reply_text(
         f'🎲 *Sala creada!*\n\n'
         f'Código: `{game_id}`\n'
         f'Jugadores (1/4):\n'
@@ -174,6 +174,7 @@ async def cmd_nueva(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown',
         reply_markup=lobby_keyboard(game_id, can_start=False)
     )
+    state.lobby_message_id = msg.message_id
 
 
 # ── /unir ──────────────────────────────────────────────────────────────────────
@@ -239,16 +240,19 @@ async def _join_game(update_or_query, context, game_id: str, is_callback: bool =
     if n == 4:
         # Sala llena — iniciar automáticamente
         await _start_game(context, state, game_id)
-        if is_callback:
+        # Editar mensaje del lobby
+        if state.lobby_message_id:
             try:
-                await update_or_query.edit_message_text(
-                    f'✅ Sala `{game_id}` — ¡La partida comenzó!',
+                await context.bot.edit_message_text(
+                    chat_id=state.chat_id,
+                    message_id=state.lobby_message_id,
+                    text=f'✅ Sala `{game_id}` — ¡La partida comenzó con {n} jugadores!',
                     parse_mode='Markdown'
                 )
             except Exception:
                 pass
     else:
-        # Actualizar lobby — mostrar botón "Iniciar ya" si hay 2+ jugadores
+        # Actualizar mensaje original del lobby con el nuevo estado
         can_start = n >= 2
         faltantes = 4 - n
         new_text = (
@@ -256,24 +260,30 @@ async def _join_game(update_or_query, context, game_id: str, is_callback: bool =
             f'Jugadores ({n}/4):\n'
             f'{players_list(state)}\n\n'
             + (f'✅ ¡Listo para jugar! Puedes iniciar ya o esperar hasta 4.\n'
-               f'Faltan {faltantes} jugador(es) para llenar la sala.'
+               f'_(Faltan {faltantes} para llenar la sala)_'
                if can_start else
                f'⏳ Esperando al menos 1 jugador más...')
         )
-        if is_callback:
+        kbd = lobby_keyboard(game_id, can_start=can_start)
+
+        # Siempre editar el mensaje original del lobby
+        if state.lobby_message_id:
             try:
-                await update_or_query.edit_message_text(
-                    new_text,
+                await context.bot.edit_message_text(
+                    chat_id=state.chat_id,
+                    message_id=state.lobby_message_id,
+                    text=new_text,
                     parse_mode='Markdown',
-                    reply_markup=lobby_keyboard(game_id, can_start=can_start)
+                    reply_markup=kbd
                 )
             except Exception:
                 pass
-        else:
+
+        # Si vino por comando, confirmar al nuevo jugador
+        if not is_callback:
             await update_or_query.message.reply_text(
-                new_text,
-                parse_mode='Markdown',
-                reply_markup=lobby_keyboard(game_id, can_start=can_start)
+                f'✅ Te uniste a la sala `{game_id}` como {PLAYER_EMOJIS[n-1]} {PLAYER_NAMES[n-1]}.',
+                parse_mode='Markdown'
             )
 
 
@@ -419,19 +429,20 @@ async def _handle_nueva_from_callback(query, context):
     active_games[game_id] = state
 
     await query.answer('¡Sala creada!')
-    await context.bot.send_message(
+    msg = await context.bot.send_message(
         chat_id=chat_id,
         text=(
             f'🎲 *Sala creada!*\n\n'
             f'Código: `{game_id}`\n'
             f'Jugadores (1/4):\n'
             f'{PLAYER_EMOJIS[0]} {user.first_name}\n\n'
-            f'⏳ Esperando 3 jugadores más...\n'
+            f'⏳ Mínimo 2 jugadores para empezar (máx. 4)\n'
             f'Usa el botón para unirte:'
         ),
         parse_mode='Markdown',
-        reply_markup=lobby_keyboard(game_id)
+        reply_markup=lobby_keyboard(game_id, can_start=False)
     )
+    state.lobby_message_id = msg.message_id
 
 
 async def _handle_roll(query, context, game_id: str):

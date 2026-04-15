@@ -33,8 +33,9 @@ class GameState:
     phase: str                         # 'waiting'|'rolling'|'moving'|'finished'
     winner: Optional[int]
     turn_count: int
-    consecutive_sixes: int = 0         # Para regla de 3 seises consecutivos
-    last_moved: Optional[Tuple[int,int]] = None  # (jugador, ficha) última movida
+    consecutive_sixes: int = 0
+    last_moved: Optional[Tuple[int,int]] = None
+    lobby_message_id: Optional[int] = None  # ID del mensaje del lobby para editarlo
 
     @classmethod
     def new(cls, game_id: str, chat_id: int) -> 'GameState':
@@ -57,4 +58,5 @@ class GameState:
             turn_count=0,
             consecutive_sixes=0,
             last_moved=None,
+            lobby_message_id=None,
         )
