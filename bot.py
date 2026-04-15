@@ -113,10 +113,12 @@ def move_keyboard(game_id: str, valid_moves: list, state: GameState) -> InlineKe
     return InlineKeyboardMarkup(rows)
 
 
-def lobby_keyboard(game_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton('✅ Unirse a esta sala', callback_data=f'j:{game_id}')
-    ]])
+def lobby_keyboard(game_id: str, can_start: bool = False) -> InlineKeyboardMarkup:
+    buttons = [InlineKeyboardButton('✅ Unirse a esta sala', callback_data=f'j:{game_id}')]
+    rows = [buttons]
+    if can_start:
+        rows.append([InlineKeyboardButton('🚀 Iniciar ya', callback_data=f's:{game_id}')])
+    return InlineKeyboardMarkup(rows)
 
 
 def players_list(state: GameState) -> str:
@@ -167,10 +169,10 @@ async def cmd_nueva(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f'Código: `{game_id}`\n'
         f'Jugadores (1/4):\n'
         f'{PLAYER_EMOJIS[0]} {user.first_name}\n\n'
-        f'⏳ Esperando 3 jugadores más...\n'
+        f'⏳ Mínimo 2 jugadores para empezar (máx. 4)\n'
         f'Comparte el código o usa el botón:',
         parse_mode='Markdown',
-        reply_markup=lobby_keyboard(game_id)
+        reply_markup=lobby_keyboard(game_id, can_start=False)
     )
 
 
@@ -232,21 +234,11 @@ async def _join_game(update_or_query, context, game_id: str, is_callback: bool =
     if is_callback:
         await update_or_query.answer(f'✅ ¡Te uniste como {PLAYER_EMOJIS[len(state.player_ids)-1]}!')
 
-    if len(state.player_ids) == 4:
-        # ¡A jugar!
-        state.phase = 'rolling'
-        p0 = state.player_names[0]
-        caption = (
-            f'🎮 *¡Ludo Loco ha comenzado!*\n\n'
-            f'{players_list(state)}\n\n'
-            f'Turno: {PLAYER_EMOJIS[0]} *{p0}*\n'
-            f'Tira el dado para empezar:'
-        )
-        kbd = turn_keyboard(game_id)
-        mid = await send_board(context, state, caption, kbd, chat_id=state.chat_id)
-        state.message_id = mid
+    n = len(state.player_ids)
 
-        # Eliminar mensaje de lobby si fue por callback
+    if n == 4:
+        # Sala llena — iniciar automáticamente
+        await _start_game(context, state, game_id)
         if is_callback:
             try:
                 await update_or_query.edit_message_text(
@@ -256,20 +248,24 @@ async def _join_game(update_or_query, context, game_id: str, is_callback: bool =
             except Exception:
                 pass
     else:
-        # Actualizar mensaje de lobby
-        n = len(state.player_ids)
+        # Actualizar lobby — mostrar botón "Iniciar ya" si hay 2+ jugadores
+        can_start = n >= 2
+        faltantes = 4 - n
         new_text = (
             f'🎲 *Sala: {game_id}*\n\n'
             f'Jugadores ({n}/4):\n'
             f'{players_list(state)}\n\n'
-            f'⏳ Esperando {4-n} jugador(es) más...'
+            + (f'✅ ¡Listo para jugar! Puedes iniciar ya o esperar hasta 4.\n'
+               f'Faltan {faltantes} jugador(es) para llenar la sala.'
+               if can_start else
+               f'⏳ Esperando al menos 1 jugador más...')
         )
         if is_callback:
             try:
                 await update_or_query.edit_message_text(
                     new_text,
                     parse_mode='Markdown',
-                    reply_markup=lobby_keyboard(game_id)
+                    reply_markup=lobby_keyboard(game_id, can_start=can_start)
                 )
             except Exception:
                 pass
@@ -277,8 +273,24 @@ async def _join_game(update_or_query, context, game_id: str, is_callback: bool =
             await update_or_query.message.reply_text(
                 new_text,
                 parse_mode='Markdown',
-                reply_markup=lobby_keyboard(game_id)
+                reply_markup=lobby_keyboard(game_id, can_start=can_start)
             )
+
+
+async def _start_game(context, state: GameState, game_id: str):
+    """Inicia la partida con los jugadores actuales (mínimo 2)."""
+    state.phase = 'rolling'
+    p0 = state.player_names[0]
+    n = len(state.player_ids)
+    caption = (
+        f'🎮 *¡Ludo Loco ha comenzado!* ({n} jugadores)\n\n'
+        f'{players_list(state)}\n\n'
+        f'Turno: {PLAYER_EMOJIS[0]} *{p0}*\n'
+        f'Tira el dado para empezar:'
+    )
+    mid = await send_board(context, state, caption, turn_keyboard(game_id),
+                           chat_id=state.chat_id)
+    state.message_id = mid
 
 
 # ── /billetera ─────────────────────────────────────────────────────────────────
@@ -357,6 +369,32 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith('j:'):
         game_id = data[2:]
         await _join_game(query, context, game_id, is_callback=True)
+        return
+
+    if data.startswith('s:'):
+        game_id = data[2:]
+        state = active_games.get(game_id)
+        if not state:
+            await query.answer('Sala no encontrada.', show_alert=True)
+            return
+        if state.phase != 'waiting':
+            await query.answer('La partida ya comenzó.', show_alert=True)
+            return
+        if query.from_user.id != state.player_ids[0]:
+            await query.answer('Solo el creador de la sala puede iniciar.', show_alert=True)
+            return
+        if len(state.player_ids) < 2:
+            await query.answer('Necesitas al menos 2 jugadores.', show_alert=True)
+            return
+        await query.answer('¡Iniciando partida!')
+        await _start_game(context, state, game_id)
+        try:
+            await query.edit_message_text(
+                f'✅ Sala `{game_id}` — ¡La partida comenzó con {len(state.player_ids)} jugadores!',
+                parse_mode='Markdown'
+            )
+        except Exception:
+            pass
         return
 
     if data.startswith('r:'):
