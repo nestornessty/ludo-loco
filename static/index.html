@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <title>Ludo Loco</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ── PANTALLA: LOBBY ── -->
+<div id="screen-lobby" class="screen active">
+  <div class="logo">
+    <div class="logo-icon">🎲</div>
+    <h1>Ludo Loco</h1>
+    <p class="logo-sub">El Parchís de Telegram</p>
+  </div>
+
+  <div id="lobby-create" class="card">
+    <button class="btn btn-primary" onclick="createGame()">🆕 Crear sala</button>
+    <div class="divider">o</div>
+    <div class="input-row">
+      <input id="join-code" type="text" placeholder="Código de sala" maxlength="6"
+             oninput="this.value=this.value.toUpperCase()"/>
+      <button class="btn btn-secondary" onclick="joinGame()">Unirse</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PANTALLA: SALA DE ESPERA ── -->
+<div id="screen-waiting" class="screen">
+  <div class="waiting-header">
+    <h2>Sala creada</h2>
+    <div class="game-code" id="waiting-code">------</div>
+    <p class="hint">Comparte el código con tus amigos</p>
+  </div>
+  <div id="waiting-players" class="players-list"></div>
+  <div class="waiting-actions">
+    <button id="btn-start" class="btn btn-primary hidden" onclick="startGame()">
+      🚀 ¡Iniciar ya!
+    </button>
+    <p class="hint" id="waiting-hint">Esperando jugadores...</p>
+  </div>
+</div>
+
+<!-- ── PANTALLA: JUEGO ── -->
+<div id="screen-game" class="screen">
+  <div class="game-header">
+    <div id="game-status" class="status-bar">🎮 Ludo Loco</div>
+  </div>
+  <div class="board-wrapper">
+    <canvas id="board-canvas"></canvas>
+  </div>
+  <div class="game-footer">
+    <div id="players-info" class="players-strip"></div>
+    <div id="action-area" class="action-area">
+      <button id="btn-roll" class="btn btn-roll hidden" onclick="rollDice()">
+        🎲 Tirar dado
+      </button>
+      <div id="piece-buttons" class="piece-buttons"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── PANTALLA: FIN ── -->
+<div id="screen-end" class="screen">
+  <div class="end-content">
+    <div class="trophy">🏆</div>
+    <h2 id="end-winner">¡Ganador!</h2>
+    <p id="end-detail"></p>
+    <button class="btn btn-primary" onclick="goLobby()">Jugar otra vez</button>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
