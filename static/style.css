@@ -260,3 +260,107 @@ html, body {
   white-space: nowrap;
 }
 .toast.hidden { display: none; }
+
+/* ── DADO 3D ─────────────────────────────────────────────────────────────── */
+.dice-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  gap: 24px;
+  backdrop-filter: blur(4px);
+}
+.dice-overlay.hidden { display: none; }
+
+.dice-scene {
+  perspective: 500px;
+  width: 110px;
+  height: 110px;
+}
+
+.dice {
+  width: 110px;
+  height: 110px;
+  position: relative;
+  transform-style: preserve-3d;
+  /* La transición se controla desde JS */
+}
+
+.face {
+  position: absolute;
+  width: 110px;
+  height: 110px;
+  background: linear-gradient(145deg, #ffffff, #e8e8e8);
+  border-radius: 18px;
+  border: 2px solid #ccc;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  padding: 14px;
+  gap: 5px;
+  box-shadow: 0 0 20px rgba(255,255,255,0.15), inset 0 2px 4px rgba(255,255,255,0.8);
+}
+
+.face.front  { transform: rotateY(  0deg) translateZ(55px); }
+.face.back   { transform: rotateY(180deg) translateZ(55px); }
+.face.right  { transform: rotateY( 90deg) translateZ(55px); }
+.face.left   { transform: rotateY(-90deg) translateZ(55px); }
+.face.top    { transform: rotateX( 90deg) translateZ(55px); }
+.face.bottom { transform: rotateX(-90deg) translateZ(55px); }
+
+.dot {
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle at 35% 35%, #444, #111);
+  border-radius: 50%;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+}
+
+/* Animación de giro rápido */
+@keyframes diceShake {
+  0%   { transform: rotateX(0deg)   rotateY(0deg)   rotateZ(0deg); }
+  15%  { transform: rotateX(180deg) rotateY(120deg)  rotateZ(60deg); }
+  30%  { transform: rotateX(360deg) rotateY(240deg)  rotateZ(120deg); }
+  50%  { transform: rotateX(540deg) rotateY(420deg)  rotateZ(200deg); }
+  70%  { transform: rotateX(720deg) rotateY(600deg)  rotateZ(300deg); }
+  85%  { transform: rotateX(810deg) rotateY(690deg)  rotateZ(340deg); }
+  100% { transform: rotateX(900deg) rotateY(780deg)  rotateZ(360deg); }
+}
+
+.dice.rolling {
+  animation: diceShake 0.9s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+.dice-result-label {
+  font-size: 28px;
+  font-weight: 900;
+  color: white;
+  text-shadow: 0 0 20px rgba(255,215,0,0.8);
+  letter-spacing: 2px;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 0.3s, transform 0.3s;
+}
+.dice-result-label.show {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Botón de tirar con animación de pulso */
+.btn-roll {
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 4px 20px rgba(230,126,0,0.4); }
+  50%       { box-shadow: 0 4px 35px rgba(230,126,0,0.8); }
+}
+
+/* Pieza brillando durante animación */
+@keyframes pieceGlow {
+  0%, 100% { filter: brightness(1); }
+  50%       { filter: brightness(1.6) drop-shadow(0 0 6px white); }
+}

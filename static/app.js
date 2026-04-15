@@ -58,6 +58,109 @@ function getPieceCell(player, piece) {
   return [7, 7];
 }
 
+// ── Dado 3D ───────────────────────────────────────────────────────────────────
+// Rotaciones finales para mostrar cada cara al frente
+const FACE_ROTATIONS = {
+  1: [0,    0,   0],
+  2: [0,   -90,  0],
+  3: [-90,  0,   0],
+  4: [90,   0,   0],
+  5: [0,    90,  0],
+  6: [0,   180,  0],
+};
+
+function showDice3D(result, callback) {
+  const overlay = document.getElementById('dice-overlay');
+  const cube    = document.getElementById('dice-3d');
+  const label   = document.getElementById('dice-result-label');
+  const diceEmojis = ['⚀','⚁','⚂','⚃','⚄','⚅'];
+
+  // Resetear sin transición
+  cube.style.transition = 'none';
+  cube.style.transform  = 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)';
+  label.classList.remove('show');
+  label.textContent = '';
+  overlay.classList.remove('hidden');
+
+  // Forzar reflow
+  void cube.offsetWidth;
+
+  // Fase 1: animación CSS de giro rápido
+  cube.classList.add('rolling');
+
+  setTimeout(() => {
+    cube.classList.remove('rolling');
+    // Fase 2: aterrizaje suave en la cara correcta
+    const [rx, ry, rz] = FACE_ROTATIONS[result];
+    const spins = 3;
+    cube.style.transition = 'transform 0.6s cubic-bezier(0.25, 1.5, 0.5, 1)';
+    cube.style.transform  = `rotateX(${rx + spins*360}deg) rotateY(${ry + spins*360}deg) rotateZ(${rz}deg)`;
+
+    // Mostrar etiqueta de resultado
+    setTimeout(() => {
+      label.textContent = `${diceEmojis[result-1]}  ${result}`;
+      label.classList.add('show');
+    }, 400);
+
+    // Ocultar overlay y continuar
+    setTimeout(() => {
+      overlay.classList.add('hidden');
+      label.classList.remove('show');
+      callback();
+    }, 1300);
+
+  }, 950); // duración de la animación CSS
+}
+
+// ── Animación de movimiento de fichas ─────────────────────────────────────────
+// pieceOverrides: { 'p_idx': [r, c] } — posición temporal durante animación
+const pieceOverrides = {};
+let animating = false;
+
+function getPosCell(player, pos, pieceIdx) {
+  if (pos === -1) return HOME_SLOTS[player][pieceIdx];
+  if (pos <= 51)  return MAIN_PATH[(PLAYER_STARTS[player] + pos) % 52];
+  if (pos <= 56)  return HOME_STRETCHES[player][pos - 52];
+  return [7, 7];
+}
+
+function animatePieceMove(player, pieceIdx, fromPos, toPos, canvas, state, callback) {
+  // Construir lista de posiciones intermedias
+  const cells = [];
+  if (fromPos === -1) {
+    cells.push(HOME_SLOTS[player][pieceIdx]);
+    cells.push(MAIN_PATH[PLAYER_STARTS[player]]);
+  } else {
+    for (let p = fromPos; p <= toPos; p++) {
+      cells.push(getPosCell(player, p, pieceIdx));
+    }
+  }
+
+  if (cells.length <= 1) { callback(); return; }
+
+  const key = `${player}_${pieceIdx}`;
+  let step = 0;
+  animating = true;
+
+  function nextStep() {
+    step++;
+    if (step >= cells.length) {
+      delete pieceOverrides[key];
+      animating = false;
+      callback();
+      return;
+    }
+    pieceOverrides[key] = cells[step];
+    renderBoard(canvas, state, pieceOverrides);
+    // Vibración suave en Telegram
+    if (tg && step % 3 === 0) tg.HapticFeedback?.impactOccurred('light');
+    setTimeout(nextStep, 160);
+  }
+
+  pieceOverrides[key] = cells[0];
+  nextStep();
+}
+
 function drawStar(ctx, cx, cy, r, color) {
   ctx.save();
   ctx.fillStyle = color;
@@ -74,7 +177,7 @@ function drawStar(ctx, cx, cy, r, color) {
 }
 
 // ── Canvas renderer ────────────────────────────────────────────────────────────
-function renderBoard(canvas, gameState) {
+function renderBoard(canvas, gameState, overrides = {}) {
   const size = Math.min(canvas.parentElement.clientWidth, canvas.parentElement.clientHeight, 500);
   const CELL = Math.floor(size / 17);
   const MARGIN = Math.floor((size - 15 * CELL) / 2);
@@ -180,16 +283,17 @@ function renderBoard(canvas, gameState) {
 
   if (!gameState) return;
 
-  // Pieces
+  // Pieces (con soporte de overrides para animación)
   const cellMap = {};
   const numPlayers = gameState.player_ids.length;
   for (let p = 0; p < numPlayers; p++) {
     for (let i = 0; i < 4; i++) {
       const piece = gameState.pieces[p][i];
-      const [r,c] = getPieceCell(p, piece);
+      const overrideKey = `${p}_${i}`;
+      const [r,c] = overrides[overrideKey] || getPieceCell(p, piece);
       const key = `${r},${c}`;
       if (!cellMap[key]) cellMap[key] = [];
-      cellMap[key].push({p, piece});
+      cellMap[key].push({p, piece, isAnimating: !!overrides[overrideKey]});
     }
   }
 
@@ -201,25 +305,33 @@ function renderBoard(canvas, gameState) {
     const offs = [[0,0],[-CELL*0.22,-CELL*0.22],[CELL*0.22,-CELL*0.22],[-CELL*0.22,CELL*0.22],[CELL*0.22,CELL*0.22]];
 
     for (let i = 0; i < group.length; i++) {
-      const {p, piece} = group[i];
+      const {p, piece, isAnimating} = group[i];
       const [ox,oy] = count>1 ? offs[i+1]||[0,0] : [0,0];
       const pcx = bcx+ox, pcy = bcy+oy;
+      const animR = isAnimating ? pr * 1.15 : pr; // ligeramente más grande al moverse
 
+      // Glow si está animando
+      if (isAnimating) {
+        ctx.save();
+        ctx.shadowColor = COLORS[p];
+        ctx.shadowBlur = 18;
+      }
       // Shadow
-      ctx.beginPath(); ctx.arc(pcx+2, pcy+2, pr, 0, Math.PI*2);
+      ctx.beginPath(); ctx.arc(pcx+2, pcy+2, animR, 0, Math.PI*2);
       ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill();
       // Body
-      ctx.beginPath(); ctx.arc(pcx, pcy, pr, 0, Math.PI*2);
+      ctx.beginPath(); ctx.arc(pcx, pcy, animR, 0, Math.PI*2);
       ctx.fillStyle = COLORS[p]; ctx.fill();
       ctx.strokeStyle = DARKS[p]; ctx.lineWidth = Math.max(1.5, CELL*0.05); ctx.stroke();
       // Highlight
-      ctx.beginPath(); ctx.arc(pcx-pr*0.28, pcy-pr*0.28, pr*0.32, 0, Math.PI*2);
+      ctx.beginPath(); ctx.arc(pcx-animR*0.28, pcy-animR*0.28, animR*0.32, 0, Math.PI*2);
       ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fill();
       // Number
       ctx.fillStyle = 'white';
-      ctx.font = `bold ${Math.max(8,Math.floor(pr*1.1))}px Arial`;
+      ctx.font = `bold ${Math.max(8,Math.floor(animR*1.1))}px Arial`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(piece.idx+1, pcx, pcy);
+      if (isAnimating) ctx.restore();
     }
   }
 }
@@ -386,25 +498,50 @@ function updateGameUI() {
 
 // ── Tirar dado ────────────────────────────────────────────────────────────────
 async function rollDice() {
+  if (animating) return;
+  document.getElementById('btn-roll').disabled = true;
   try {
     const data = await api('POST', `/games/${currentGameId}/roll`, {user_id: ME.id});
-    gameState = data;
-    updateGameUI();
-    if (data.note) toast(data.note);
-  } catch(e) { toast(e.message); }
+    // Primero mostrar animación del dado, luego actualizar estado
+    showDice3D(data.dice_value, () => {
+      gameState = data;
+      updateGameUI();
+      if (data.note) toast(data.note);
+      document.getElementById('btn-roll').disabled = false;
+    });
+  } catch(e) {
+    toast(e.message);
+    document.getElementById('btn-roll').disabled = false;
+  }
 }
 
 // ── Mover ficha ───────────────────────────────────────────────────────────────
 async function movePiece(idx) {
+  if (animating) return;
+  // Deshabilitar botones durante animación
+  document.querySelectorAll('.piece-btn').forEach(b => b.disabled = true);
   try {
+    const cp = gameState.current_player;
+    const fromPos = gameState.pieces[cp][idx].pos;
+    const dice = gameState.dice_value;
+    const toPos = fromPos === -1 ? 0 : Math.min(fromPos + dice, 57);
+
     const data = await api('POST', `/games/${currentGameId}/move/${idx}`, {user_id: ME.id});
-    gameState = data;
-    const ev = data.events || {};
-    if (ev.captured) toast('💥 ¡Captura! Turno extra +8 LULOCO');
-    else if (ev.piece_finished) toast('🎯 ¡Ficha al centro! +12 LULOCO');
-    else if (ev.extra_turn) toast('🔄 ¡Turno extra!');
-    updateGameUI();
-  } catch(e) { toast(e.message); }
+
+    // Animar el movimiento antes de actualizar estado
+    const canvas = document.getElementById('board-canvas');
+    animatePieceMove(cp, idx, fromPos, toPos, canvas, gameState, () => {
+      gameState = data;
+      const ev = data.events || {};
+      if (ev.captured) toast('💥 ¡Captura! +8 LULOCO');
+      else if (ev.piece_finished) toast('🎯 ¡Ficha al centro! +12 LULOCO');
+      else if (ev.extra_turn) toast('🔄 ¡Turno extra!');
+      updateGameUI();
+    });
+  } catch(e) {
+    toast(e.message);
+    document.querySelectorAll('.piece-btn').forEach(b => b.disabled = false);
+  }
 }
 
 // ── Fin de partida ────────────────────────────────────────────────────────────
