@@ -7,6 +7,7 @@ import random
 import string
 import logging
 from io import BytesIO
+from typing import Optional
 
 from dotenv import load_dotenv
 from telegram import (
@@ -50,6 +51,72 @@ def gen_game_id(length: int = 6) -> str:
             return gid
 
 
+def _render_png(state: GameState) -> BytesIO:
+    img = render_board(state)
+    bio = BytesIO()
+    img.save(bio, format='PNG', optimize=True)
+    bio.seek(0)
+    return bio
+
+
+async def _send_or_edit(context, chat_id: int, msg_id: Optional[int],
+                        bio: BytesIO, caption: str, keyboard) -> int:
+    """Envía o edita un mensaje de tablero en un chat específico."""
+    if msg_id:
+        try:
+            bio.seek(0)
+            await context.bot.edit_message_media(
+                chat_id=chat_id, message_id=msg_id,
+                media=InputMediaPhoto(bio, caption=caption, parse_mode='Markdown'),
+            )
+            await context.bot.edit_message_reply_markup(
+                chat_id=chat_id, message_id=msg_id, reply_markup=keyboard,
+            )
+            return msg_id
+        except Exception:
+            pass
+    bio.seek(0)
+    msg = await context.bot.send_photo(
+        chat_id=chat_id, photo=bio,
+        caption=caption, parse_mode='Markdown', reply_markup=keyboard,
+    )
+    return msg.message_id
+
+
+async def send_board_all(
+    context: ContextTypes.DEFAULT_TYPE,
+    state: GameState,
+    caption: str,
+    keyboard: InlineKeyboardMarkup,
+):
+    """Envía/edita el tablero a TODOS los jugadores en su chat privado."""
+    bio = _render_png(state)
+
+    # Asegurarse de que la lista de msg_ids tiene el tamaño correcto
+    while len(state.player_msg_ids) < len(state.player_chat_ids):
+        state.player_msg_ids.append(None)
+
+    for i, pchat in enumerate(state.player_chat_ids):
+        p = state.current_player
+        # Solo el jugador activo ve el botón de acción; los demás ven "esperando"
+        if i == p:
+            kbd = keyboard
+            cap = caption
+        else:
+            name = state.player_names[p]
+            emoji = PLAYER_EMOJIS[p]
+            cap = caption + f'\n\n⏳ _Esperando a {emoji} {name}..._'
+            kbd = InlineKeyboardMarkup([])  # Sin botones para los que esperan
+
+        try:
+            mid = await _send_or_edit(
+                context, pchat, state.player_msg_ids[i], bio, cap, kbd
+            )
+            state.player_msg_ids[i] = mid
+        except Exception as e:
+            log.warning(f'No se pudo enviar tablero a jugador {i} (chat {pchat}): {e}')
+
+
 async def send_board(
     context: ContextTypes.DEFAULT_TYPE,
     state: GameState,
@@ -58,36 +125,12 @@ async def send_board(
     chat_id: int = None,
     edit_message_id: int = None,
 ):
-    """Envía o edita el mensaje del tablero con imagen PNG."""
-    img = render_board(state)
-    bio = BytesIO()
-    img.save(bio, format='PNG', optimize=True)
-    bio.seek(0)
-
-    if edit_message_id:
-        try:
-            await context.bot.edit_message_media(
-                chat_id=chat_id or state.chat_id,
-                message_id=edit_message_id,
-                media=InputMediaPhoto(bio, caption=caption, parse_mode='Markdown'),
-            )
-            await context.bot.edit_message_reply_markup(
-                chat_id=chat_id or state.chat_id,
-                message_id=edit_message_id,
-                reply_markup=keyboard,
-            )
-            return edit_message_id
-        except Exception:
-            pass  # Si falla editar, enviamos uno nuevo
-
-    msg = await context.bot.send_photo(
-        chat_id=chat_id or state.chat_id,
-        photo=bio,
-        caption=caption,
-        parse_mode='Markdown',
-        reply_markup=keyboard,
+    """Compatibilidad: envía solo a un chat específico (para lobby/errores)."""
+    bio = _render_png(state)
+    mid = await _send_or_edit(
+        context, chat_id or state.chat_id, edit_message_id, bio, caption, keyboard
     )
-    return msg.message_id
+    return mid
 
 
 def turn_keyboard(game_id: str) -> InlineKeyboardMarkup:
@@ -162,6 +205,8 @@ async def cmd_nueva(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = GameState.new(game_id, chat_id)
     state.player_ids.append(user.id)
     state.player_names.append(user.first_name)
+    state.player_chat_ids.append(chat_id)  # chat privado del creador
+    state.player_msg_ids.append(None)
     active_games[game_id] = state
 
     msg = await update.message.reply_text(
@@ -231,6 +276,8 @@ async def _join_game(update_or_query, context, game_id: str, is_callback: bool =
 
     state.player_ids.append(user.id)
     state.player_names.append(user.first_name)
+    state.player_chat_ids.append(chat_id)
+    state.player_msg_ids.append(None)
 
     if is_callback:
         await update_or_query.answer(f'✅ ¡Te uniste como {PLAYER_EMOJIS[len(state.player_ids)-1]}!')
@@ -298,9 +345,7 @@ async def _start_game(context, state: GameState, game_id: str):
         f'Turno: {PLAYER_EMOJIS[0]} *{p0}*\n'
         f'Tira el dado para empezar:'
     )
-    mid = await send_board(context, state, caption, turn_keyboard(game_id),
-                           chat_id=state.chat_id)
-    state.message_id = mid
+    await send_board_all(context, state, caption, turn_keyboard(game_id))
 
 
 # ── /billetera ─────────────────────────────────────────────────────────────────
@@ -494,10 +539,7 @@ async def _handle_roll(query, context, game_id: str):
             f'{DICE_EMOJI[dice-1]} **{dice}**{extra_note}\n\n'
             f'Turno: {PLAYER_EMOJIS[cp_new]} *{state.player_names[cp_new]}*'
         )
-        state.message_id = await send_board(
-            context, state, caption, turn_keyboard(game_id),
-            chat_id=state.chat_id, edit_message_id=state.message_id
-        )
+        await send_board_all(context, state, caption, turn_keyboard(game_id))
         return
 
     valid = get_valid_moves(state)
@@ -508,7 +550,6 @@ async def _handle_roll(query, context, game_id: str):
     dice_str = f'{DICE_EMOJI[dice-1]} **{dice}**'
 
     if not valid:
-        # Sin movimientos posibles → siguiente turno
         caption = (
             f'🎮 *Ludo Loco*\n\n'
             f'{cp_emoji} {cp_name} sacó {dice_str}\n'
@@ -517,10 +558,7 @@ async def _handle_roll(query, context, game_id: str):
         advance_turn(state, extra_turn=False)
         cp_new = state.current_player
         caption += f'Turno: {PLAYER_EMOJIS[cp_new]} *{state.player_names[cp_new]}*'
-        state.message_id = await send_board(
-            context, state, caption, turn_keyboard(game_id),
-            chat_id=state.chat_id, edit_message_id=state.message_id
-        )
+        await send_board_all(context, state, caption, turn_keyboard(game_id))
         return
 
     state.phase = 'moving'
@@ -529,11 +567,7 @@ async def _handle_roll(query, context, game_id: str):
         f'{cp_emoji} *{cp_name}* sacó {dice_str}\n'
         f'Elige qué ficha mover:'
     )
-    state.message_id = await send_board(
-        context, state, caption,
-        move_keyboard(game_id, valid, state),
-        chat_id=state.chat_id, edit_message_id=state.message_id
-    )
+    await send_board_all(context, state, caption, move_keyboard(game_id, valid, state))
 
 
 async def _handle_move(query, context, game_id: str, piece_idx: int):
@@ -595,11 +629,7 @@ async def _handle_move(query, context, game_id: str, piece_idx: int):
             f'*Jugadores:*\n{players_list(state)}\n\n'
             f'Turnos: {state.turn_count}'
         )
-        await send_board(
-            context, state, caption,
-            InlineKeyboardMarkup([]),
-            chat_id=state.chat_id, edit_message_id=state.message_id
-        )
+        await send_board_all(context, state, caption, InlineKeyboardMarkup([]))
         del active_games[game_id]
         return
 
@@ -621,10 +651,7 @@ async def _handle_move(query, context, game_id: str, piece_idx: int):
         f'🎮 *Ludo Loco*{notes}\n\n'
         f'Turno: {PLAYER_EMOJIS[cp_new]} *{state.player_names[cp_new]}*'
     )
-    state.message_id = await send_board(
-        context, state, caption, turn_keyboard(game_id),
-        chat_id=state.chat_id, edit_message_id=state.message_id
-    )
+    await send_board_all(context, state, caption, turn_keyboard(game_id))
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────

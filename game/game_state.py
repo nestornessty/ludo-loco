@@ -26,16 +26,18 @@ class GameState:
     message_id: Optional[int]
     player_ids: List[int]
     player_names: List[str]
-    pieces: List[List[Piece]]          # [jugador][índice_ficha]
-    current_player: int                # 0-3 turno actual
-    dice_value: Optional[int]          # None = no ha tirado
-    valid_moves: List[int]             # índices de fichas que pueden moverse
-    phase: str                         # 'waiting'|'rolling'|'moving'|'finished'
+    player_chat_ids: List[int]           # chat_id privado de cada jugador
+    player_msg_ids: List[Optional[int]]  # message_id del tablero en cada chat
+    pieces: List[List[Piece]]
+    current_player: int
+    dice_value: Optional[int]
+    valid_moves: List[int]
+    phase: str                           # 'waiting'|'rolling'|'moving'|'finished'
     winner: Optional[int]
     turn_count: int
     consecutive_sixes: int = 0
     last_moved: Optional[Tuple[int,int]] = None
-    lobby_message_id: Optional[int] = None  # ID del mensaje del lobby para editarlo
+    lobby_message_id: Optional[int] = None
 
     @classmethod
     def new(cls, game_id: str, chat_id: int) -> 'GameState':
@@ -49,6 +51,8 @@ class GameState:
             message_id=None,
             player_ids=[],
             player_names=[],
+            player_chat_ids=[],
+            player_msg_ids=[],
             pieces=pieces,
             current_player=0,
             dice_value=None,
