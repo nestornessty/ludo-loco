@@ -207,7 +207,9 @@ function showDice3D(result, callback) {
   rafId = requestAnimationFrame(animate);
 }
 
-// ── Efectos de sonido (Web Audio API — sin archivos externos) ─────────────────
+// ── Efectos de sonido: WAV sintetizado → HTMLAudioElement ─────────────────────
+// Usamos HTMLAudioElement en lugar de Web Audio API porque el WebView de
+// Telegram bloquea AudioContext en móvil. Los WAV se generan en memoria.
 let _sfxMuted = false;
 
 function toggleMute() {
@@ -216,166 +218,153 @@ function toggleMute() {
 }
 
 const SFX = (() => {
-  const AC = window.AudioContext || window.webkitAudioContext;
-  let ctx = null;
+  const SR = 22050;   // sample rate (Hz)
+  const urls = {};    // blob URLs pre-generados
 
-  // Inicializa/reanuda el contexto (requiere gesto del usuario — siempre se llama desde click)
-  function ac() {
-    if (!AC) return null;
-    if (!ctx) ctx = new AC();
-    if (ctx.state === 'suspended') ctx.resume();
-    return ctx;
+  // ── Síntesis PCM ─────────────────────────────────────────────────────────────
+
+  // Tono sinusoidal con envolvente: attack rápido + decay exponencial
+  function addTone(s, freq, t0, dur, vol, freqEnd = null) {
+    const i0 = Math.floor(t0 * SR);
+    const len = Math.floor(dur * SR);
+    for (let i = 0; i < len; i++) {
+      if (i0 + i >= s.length) break;
+      const p   = i / len;
+      const env = p < 0.06 ? p / 0.06 : Math.exp(-5.0 * (p - 0.06));
+      const f   = freqEnd ? freq * Math.pow(freqEnd / freq, p) : freq;
+      s[i0 + i] += Math.sin(2 * Math.PI * f * i / SR) * vol * env;
+    }
   }
 
-  // Oscilador simple con envolvente de amplitud
-  function tone(freq, type, t, dur, vol = 0.28, freqEnd = null) {
-    const a = ac(); if (!a) return;
-    const osc = a.createOscillator();
-    const g   = a.createGain();
-    osc.connect(g); g.connect(a.destination);
-    osc.type = type;
-    const now = a.currentTime + t;
-    osc.frequency.setValueAtTime(freq, now);
-    if (freqEnd) osc.frequency.exponentialRampToValueAtTime(freqEnd, now + dur);
-    g.gain.setValueAtTime(vol, now);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    osc.start(now);
-    osc.stop(now + dur + 0.05);
+  // Ruido blanco con decay exponencial (impactos, whooshes, fuegos)
+  function addNoise(s, t0, dur, vol, decay = 5) {
+    const i0 = Math.floor(t0 * SR);
+    const len = Math.floor(dur * SR);
+    for (let i = 0; i < len; i++) {
+      if (i0 + i >= s.length) break;
+      s[i0 + i] += (Math.random() * 2 - 1) * vol * Math.exp(-decay * i / len);
+    }
   }
 
-  // Ruido blanco filtrado (ideal para impactos y whooshes)
-  function noise(t, dur, vol = 0.15, fCenter = 1000, q = 0.8) {
-    const a = ac(); if (!a) return;
-    const samples = Math.ceil(a.sampleRate * dur);
-    const buf = a.createBuffer(1, samples, a.sampleRate);
-    const d   = buf.getChannelData(0);
-    for (let i = 0; i < samples; i++) d[i] = Math.random() * 2 - 1;
-    const src  = a.createBufferSource();
-    src.buffer = buf;
-    const filt = a.createBiquadFilter();
-    filt.type = 'bandpass';
-    filt.frequency.value = fCenter;
-    filt.Q.value = q;
-    const g = a.createGain();
-    const now = a.currentTime + t;
-    g.gain.setValueAtTime(vol, now);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(filt); filt.connect(g); g.connect(a.destination);
-    src.start(now); src.stop(now + dur + 0.05);
+  // Convierte Float32Array → WAV Blob URL
+  function toURL(s) {
+    let mx = 0;
+    for (let i = 0; i < s.length; i++) mx = Math.max(mx, Math.abs(s[i]));
+    const gain = mx > 0 ? 0.92 / mx : 1;
+    const buf  = new ArrayBuffer(44 + s.length * 2);
+    const v    = new DataView(buf);
+    const str  = (o, x) => { for (let i = 0; i < x.length; i++) v.setUint8(o + i, x.charCodeAt(i)); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + s.length * 2, true);
+    str(8, 'WAVE'); str(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, SR, true); v.setUint32(28, SR * 2, true);
+    v.setUint16(32, 2, true);  v.setUint16(34, 16, true);
+    str(36, 'data'); v.setUint32(40, s.length * 2, true);
+    for (let i = 0; i < s.length; i++)
+      v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, s[i] * gain)) * 32767, true);
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  }
+
+  function make(dur, fn) {
+    const s = new Float32Array(Math.ceil(dur * SR));
+    fn(s);
+    return toURL(s);
+  }
+
+  // ── Definiciones de sonidos ──────────────────────────────────────────────────
+
+  function build() {
+    // 🎲 Dado — repiqueteo que se ralentiza + boom al aterrizar
+    urls.dice = make(1.18, s => {
+      [0, .07, .13, .20, .30, .42, .57, .71, .83].forEach((t, i) => {
+        addNoise(s, t, 0.06, 0.55 - i * 0.045, 7);
+        addTone (s, 290 + i * 20, t, 0.05, 0.18);
+      });
+      addNoise(s, 0.92, 0.20, 1.0, 3);
+      addTone (s, 88,   0.92, 0.32, 0.85, 42);
+      addTone (s, 176,  0.94, 0.24, 0.55, 68);
+    });
+
+    // 👣 Paso de ficha — click seco
+    urls.step = make(0.09, s => {
+      addNoise(s, 0, 0.05, 0.7, 9);
+      addTone (s, 680, 0, 0.05, 0.45);
+    });
+
+    // 🚀 Sale de casa — whoosh ascendente + chispa
+    urls.exitHome = make(0.65, s => {
+      addTone (s, 120,  0,    0.30, 0.75, 1700);
+      addNoise(s, 0,    0.30, 0.55, 3);
+      addTone (s, 1046, 0.22, 0.32, 1.0);
+      addTone (s, 1318, 0.28, 0.26, 0.75);
+    });
+
+    // 💥 CAPTURA — sub-bass BOOM + crack explosivo + eco
+    urls.capture = make(0.88, s => {
+      addTone (s, 70,  0,    0.58, 1.0, 19);   // sub-bass
+      addTone (s, 44,  0,    0.62, 0.8, 15);   // sub-sub
+      addNoise(s, 0,   0.10, 1.2, 2);           // crack inicial
+      addNoise(s, 0.06,0.15, 0.7, 4);           // ruido grave
+      addTone (s, 250, 0,    0.22, 0.65, 38);   // distorsión
+      addTone (s, 50,  0.22, 0.42, 0.55, 14);  // eco grave
+      addNoise(s, 0.28,0.32, 0.40, 5);          // cola
+    });
+
+    // 🎯 Ficha al centro — arpeggio brillante con armónicos
+    urls.pieceHome = make(0.88, s => {
+      [[523, 0], [659, .11], [784, .22], [1047, .33]].forEach(([f, t]) => {
+        addTone(s, f,     t, 0.45, 0.85);
+        addTone(s, f * 2, t, 0.18, 0.40);
+        addTone(s, f * 3, t, 0.10, 0.20);
+      });
+      addNoise(s, 0.44, 0.20, 0.35, 4);
+    });
+
+    // 🔄 Turno extra — subida de 4 notas
+    urls.extraTurn = make(0.58, s => {
+      addTone(s, 523,  0,    0.13, 0.65);
+      addTone(s, 659,  0.11, 0.13, 0.65);
+      addTone(s, 784,  0.22, 0.15, 0.75);
+      addTone(s, 1046, 0.33, 0.22, 0.85);
+    });
+
+    // 🏆 VICTORIA — fanfarria épica + fuegos artificiales
+    urls.victory = make(2.75, s => {
+      [[523,0,.13],[523,.14,.13],[523,.28,.13],[415,.42,.22],
+       [523,.60,.46],[415,1.00,.22],[523,1.18,.90]].forEach(([f, t, d]) => {
+        addTone(s, f,       t, d,      1.0);
+        addTone(s, f * 1.5, t, d * .8, 0.50);
+        addTone(s, f * 2,   t, d * .6, 0.28);
+      });
+      addTone(s, 60, 0, 0.52, 0.85, 34);   // sub-bass épico
+      [.50, .88, 1.18, 1.50, 1.80, 2.05].forEach(t =>
+        addNoise(s, t, 0.18, 0.55, 3));     // fuegos artificiales
+      [[784,1.88],[880,1.98],[988,2.08],[1047,2.18],[1318,2.30]]
+        .forEach(([f, t]) => addTone(s, f, t, 0.32, 0.85));
+    });
+  }
+
+  // Generar todos los sonidos al cargar (solo matemáticas, instantáneo)
+  try { build(); } catch(e) { console.warn('SFX build error:', e); }
+
+  // Reproducir por nombre (crea un nuevo Audio cada vez para solapamiento)
+  function play(name) {
+    if (_sfxMuted || !urls[name]) return;
+    try {
+      const a = new Audio(urls[name]);
+      a.volume = 1.0;
+      a.play().catch(() => {});
+    } catch(e) {}
   }
 
   return {
-
-    // 🎲 Dado rodando — clics acelerados + impacto final al aterrizar
-    dice() {
-      if (_sfxMuted) return;
-      try {
-        // Repiqueteo del dado (rápido al inicio, lento al final)
-        [0, 0.06, 0.11, 0.17, 0.25, 0.36, 0.50, 0.65, 0.78].forEach((t, i) => {
-          noise(t, 0.055, 0.14 - i * 0.012, 900, 1.2);
-          tone(280 + i * 18, 'sine', t, 0.045, 0.08);
-        });
-        // IMPACTO al parar
-        noise(0.88, 0.14, 0.38, 280, 0.5);
-        tone(100, 'sine', 0.88, 0.28, 0.42, 50);
-        tone(200, 'sine', 0.90, 0.20, 0.22, 70);
-      } catch(e) {}
-    },
-
-    // 👣 Paso de ficha — click corto y limpio
-    step() {
-      if (_sfxMuted) return;
-      try {
-        noise(0, 0.038, 0.08, 1100, 1.5);
-        tone(620, 'sine', 0, 0.038, 0.07);
-      } catch(e) {}
-    },
-
-    // 🚀 Ficha sale de casa — whoosh ascendente + chispa
-    exitHome() {
-      if (_sfxMuted) return;
-      try {
-        tone(140, 'sawtooth', 0,    0.28, 0.22, 1500);
-        noise(0,              0.28, 0.13, 700,  0.6);
-        tone(1046, 'sine',    0.20, 0.28, 0.32);
-        tone(1318, 'sine',    0.26, 0.22, 0.22);
-      } catch(e) {}
-    },
-
-    // 💥 CAPTURA — explosión grave + crack + eco
-    capture() {
-      if (_sfxMuted) return;
-      try {
-        // Sub-bass BOOM
-        tone(75,  'sine',     0,    0.55, 0.58, 22);
-        tone(48,  'sine',     0,    0.60, 0.44, 18);
-        // Crack de alta frecuencia
-        noise(0,              0.09, 0.60, 6000, 0.5);
-        noise(0.04,           0.13, 0.38, 1200, 0.7);
-        // Distorsión metálica
-        tone(280, 'sawtooth', 0,    0.18, 0.32, 45);
-        tone(190, 'square',   0,    0.16, 0.26, 38);
-        // Eco grave tardío
-        tone(55,  'sine',     0.18, 0.38, 0.28, 18);
-        noise(0.22,           0.28, 0.18, 350,  0.6);
-      } catch(e) {}
-    },
-
-    // 🎯 Ficha llega al centro — arpeggio brillante
-    pieceHome() {
-      if (_sfxMuted) return;
-      try {
-        [[523,0],[659,0.10],[784,0.20],[1047,0.30]].forEach(([f, t]) => {
-          tone(f,     'sine',     t, 0.42, 0.33);
-          tone(f * 2, 'sine',     t, 0.14, 0.14);
-          tone(f * 1.5,'triangle',t, 0.10, 0.10);
-        });
-        noise(0.38, 0.18, 0.13, 3500, 0.5);
-        tone(2093,  'sine', 0.40, 0.22, 0.20);
-      } catch(e) {}
-    },
-
-    // 🔄 Turno extra — subida rápida de 4 notas
-    extraTurn() {
-      if (_sfxMuted) return;
-      try {
-        tone(523,  'sine', 0,    0.10, 0.22);
-        tone(659,  'sine', 0.09, 0.10, 0.22);
-        tone(784,  'sine', 0.18, 0.12, 0.26);
-        tone(1046, 'sine', 0.27, 0.18, 0.24);
-      } catch(e) {}
-    },
-
-    // 🏆 VICTORIA — fanfarria épica con fuegos artificiales
-    victory() {
-      if (_sfxMuted) return;
-      try {
-        // Melodía principal (estilo fanfarria militar)
-        [
-          [523, 0,    0.12],
-          [523, 0.13, 0.12],
-          [523, 0.26, 0.12],
-          [415, 0.39, 0.20],
-          [523, 0.58, 0.44],
-          [415, 0.98, 0.20],
-          [523, 1.16, 0.85],
-        ].forEach(([f, t, d]) => {
-          tone(f,       'triangle', t, d,       0.40);
-          tone(f * 1.5, 'sine',     t, d * 0.8, 0.18);
-          tone(f * 2,   'sine',     t, d * 0.6, 0.11);
-        });
-        // Sub-bass de poder
-        tone(65, 'sine', 0, 0.45, 0.38, 38);
-        // Fuegos artificiales (chispas aleatorias)
-        [0.5, 0.85, 1.15, 1.45, 1.75, 2.0].forEach((t, i) => {
-          noise(t, 0.14, 0.22, 2000 + i * 600, 0.5);
-        });
-        // Subida final victoriosa
-        [[784,1.85],[880,1.95],[988,2.05],[1047,2.15],[1318,2.28]].forEach(([f, t]) => {
-          tone(f, 'sine', t, 0.28, 0.30);
-        });
-      } catch(e) {}
-    },
+    dice()      { play('dice');      },
+    step()      { play('step');      },
+    exitHome()  { play('exitHome');  },
+    capture()   { play('capture');   },
+    pieceHome() { play('pieceHome'); },
+    extraTurn() { play('extraTurn'); },
+    victory()   { play('victory');   },
   };
 })();
 
