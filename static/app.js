@@ -856,6 +856,7 @@ function goLobby() {
 
 // ── Crear sala ────────────────────────────────────────────────────────────────
 async function createGame() {
+  startMusic();
   try {
     const data = await api('POST', '/games', {user_id: ME.id, user_name: ME.name});
     currentGameId = data.game_id;
@@ -869,6 +870,7 @@ async function createGame() {
 
 // ── Unirse ────────────────────────────────────────────────────────────────────
 async function joinGame() {
+  startMusic();
   const code = document.getElementById('join-code').value.trim().toUpperCase();
   if (code.length < 4) { toast('Introduce el código de sala'); return; }
   try {
@@ -967,6 +969,7 @@ function updateGameUI() {
 
 // ── Tirar dado ────────────────────────────────────────────────────────────────
 async function rollDice() {
+  startMusic();
   if (animating) return;
   const btn = document.getElementById('btn-roll');
   btn.disabled = true;
