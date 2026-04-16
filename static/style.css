@@ -1,16 +1,16 @@
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
 :root {
-  --bg: #1a0f05;
-  --card: #2c1a0a;
+  --bg: #0e0804;
+  --card: #1e0e06;
   --border: #4a2e10;
   --text: #f0e0c0;
   --text-dim: #9a7a50;
-  --yellow: #FFD700;
-  --green: #22CC44;
-  --red: #FF4444;
-  --blue: #3399FF;
-  --gold: #FFD700;
+  --yellow: #FFD000;
+  --green: #00CC44;
+  --red: #FF1133;
+  --blue: #0088FF;
+  --gold: #FFD000;
 }
 
 html, body {

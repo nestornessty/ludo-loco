@@ -36,9 +36,9 @@ const HOME_SLOTS = [
   [[10,2],[10,4],[12,2],[12,4]],
 ];
 const SAFE = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
-const COLORS  = ['#FFD700','#22CC44','#FF4444','#3399FF'];
-const DARKS   = ['#CC8800','#117722','#BB1111','#1155BB'];
-const LIGHTS  = ['#FFF5B0','#B0FFB0','#FFB0B0','#B0CCFF'];
+const COLORS  = ['#FFD000','#00CC44','#FF1133','#0088FF'];
+const DARKS   = ['#996600','#006622','#AA0022','#0044CC'];
+const LIGHTS  = ['#FFF8CC','#CCFFE0','#FFCCD4','#CCE8FF'];
 const NAMES   = ['Amarillo','Verde','Rojo','Azul'];
 const EMOJIS  = ['🟡','🟢','🔴','🔵'];
 const HOME_AREAS = [
@@ -255,75 +255,236 @@ function animatePieceMove(player, pieceIdx, fromPos, toPos, canvas, state, callb
   nextStep();
 }
 
-function drawStar(ctx, cx, cy, r, color) {
+// ── Dibujo de estrella ─────────────────────────────────────────────────────────
+function drawStar(ctx, scx, scy, r, color) {
   ctx.save();
   ctx.fillStyle = color;
   ctx.beginPath();
   for (let i = 0; i < 10; i++) {
     const angle = (i * 36 - 90) * Math.PI / 180;
     const rad = i % 2 === 0 ? r : r * 0.42;
-    i === 0 ? ctx.moveTo(cx + rad*Math.cos(angle), cy + rad*Math.sin(angle))
-            : ctx.lineTo(cx + rad*Math.cos(angle), cy + rad*Math.sin(angle));
+    i === 0 ? ctx.moveTo(scx + rad*Math.cos(angle), scy + rad*Math.sin(angle))
+            : ctx.lineTo(scx + rad*Math.cos(angle), scy + rad*Math.sin(angle));
   }
   ctx.closePath();
   ctx.fill();
   ctx.restore();
 }
 
+function drawStarGlow(ctx, scx, scy, r, color) {
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 10;
+  drawStar(ctx, scx, scy, r, color);
+  ctx.restore();
+}
+
+// ── Pieza 3D ───────────────────────────────────────────────────────────────────
+function drawPiece3D(ctx, pcx, pcy, pr, color, dark, num, isAnimating, isValid) {
+  ctx.save();
+
+  // Anillo dorado para movimientos válidos
+  if (isValid) {
+    ctx.beginPath();
+    ctx.arc(pcx, pcy, pr + 3, 0, Math.PI * 2);
+    ctx.strokeStyle = '#FFD000';
+    ctx.lineWidth = Math.max(2, pr * 0.2);
+    ctx.shadowColor = '#FFD000';
+    ctx.shadowBlur = 10;
+    ctx.stroke();
+    ctx.shadowColor = 'transparent';
+  }
+
+  // Glow al animar
+  if (isAnimating) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 22;
+  } else {
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 1.5;
+    ctx.shadowOffsetY = 3;
+  }
+
+  // Cuerpo: gradiente radial que simula esfera 3D
+  const bodyGrad = ctx.createRadialGradient(
+    pcx - pr*0.28, pcy - pr*0.32, pr * 0.04,
+    pcx + pr*0.08, pcy + pr*0.08, pr
+  );
+  bodyGrad.addColorStop(0,    lighten(color, 0.6));
+  bodyGrad.addColorStop(0.4,  color);
+  bodyGrad.addColorStop(0.82, dark);
+  bodyGrad.addColorStop(1,    '#000000');
+  ctx.beginPath();
+  ctx.arc(pcx, pcy, pr, 0, Math.PI * 2);
+  ctx.fillStyle = bodyGrad;
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+
+  // Borde
+  ctx.strokeStyle = dark;
+  ctx.lineWidth = Math.max(1, pr * 0.08);
+  ctx.stroke();
+
+  // Reflejo especular (punto brillante arriba-izquierda)
+  const specGrad = ctx.createRadialGradient(
+    pcx - pr*0.30, pcy - pr*0.35, 0,
+    pcx - pr*0.30, pcy - pr*0.35, pr * 0.46
+  );
+  specGrad.addColorStop(0,   'rgba(255,255,255,0.88)');
+  specGrad.addColorStop(0.55,'rgba(255,255,255,0.22)');
+  specGrad.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.beginPath();
+  ctx.arc(pcx - pr*0.30, pcy - pr*0.35, pr * 0.46, 0, Math.PI * 2);
+  ctx.fillStyle = specGrad;
+  ctx.fill();
+
+  // Número con sombra
+  ctx.shadowColor = 'rgba(0,0,0,0.7)';
+  ctx.shadowBlur = 3;
+  ctx.shadowOffsetY = 1;
+  ctx.shadowOffsetX = 0;
+  ctx.fillStyle = 'white';
+  ctx.font = `bold ${Math.max(8, Math.floor(pr * 1.05))}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(num, pcx, pcy + pr * 0.06);
+  ctx.restore();
+}
+
 // ── Canvas renderer ────────────────────────────────────────────────────────────
 function renderBoard(canvas, gameState, overrides = {}) {
-  const size = Math.min(canvas.parentElement.clientWidth, canvas.parentElement.clientHeight, 500);
+  const size = Math.min(canvas.parentElement.clientWidth, canvas.parentElement.clientHeight, 520);
   const CELL = Math.floor(size / 17);
   const MARGIN = Math.floor((size - 15 * CELL) / 2);
-  canvas.width = size;
+  canvas.width  = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-  const cx = (r, c) => MARGIN + c * CELL + CELL / 2;
-  const cy = (r, c) => MARGIN + r * CELL + CELL / 2;
+  const ccx = (r, c) => MARGIN + c * CELL + CELL / 2;
+  const ccy = (r, c) => MARGIN + r * CELL + CELL / 2;
+  const BX = MARGIN, BY = MARGIN, BW = 15 * CELL, BH = 15 * CELL;
 
-  // Frame
-  ctx.fillStyle = '#2A1608';
+  // ── Fondo oscuro del frame ──────────────────────────────────────────────────
+  const fgrd = ctx.createRadialGradient(size/2, size/2, size*0.1, size/2, size/2, size*0.75);
+  fgrd.addColorStop(0, '#2A1208');
+  fgrd.addColorStop(1, '#0C0402');
+  ctx.fillStyle = fgrd;
   ctx.fillRect(0, 0, size, size);
 
-  // Board background
-  ctx.fillStyle = '#F2E0BC';
-  ctx.fillRect(MARGIN, MARGIN, 15*CELL, 15*CELL);
+  // ── Sombra + superficie del tablero ────────────────────────────────────────
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur = 28;
+  ctx.shadowOffsetX = 4;
+  ctx.shadowOffsetY = 10;
+  ctx.fillStyle = '#E8C880';
+  ctx.fillRect(BX, BY, BW, BH);
+  ctx.restore();
 
-  // Home areas
+  // Superficie con gradiente (luz desde arriba-izquierda)
+  const bgrd = ctx.createLinearGradient(BX, BY, BX + BW, BY + BH);
+  bgrd.addColorStop(0, '#FFFBF2');
+  bgrd.addColorStop(1, '#E4C878');
+  ctx.fillStyle = bgrd;
+  ctx.fillRect(BX, BY, BW, BH);
+
+  // Borde biselado: lado claro (arriba/izquierda)
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(BX, BY + BH); ctx.lineTo(BX, BY); ctx.lineTo(BX + BW, BY);
+  ctx.stroke();
+  // Borde oscuro (abajo/derecha)
+  ctx.strokeStyle = 'rgba(0,0,0,0.30)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(BX + BW, BY); ctx.lineTo(BX + BW, BY + BH); ctx.lineTo(BX, BY + BH);
+  ctx.stroke();
+  // Marco exterior
+  ctx.strokeStyle = '#7A4010';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(BX, BY, BW, BH);
+
+  // ── Áreas de casa ──────────────────────────────────────────────────────────
   for (let p = 0; p < 4; p++) {
     const [r1,c1,r2,c2] = HOME_AREAS[p];
     const W = (c2-c1+1)*CELL, H = (r2-r1+1)*CELL;
     const x = MARGIN+c1*CELL, y = MARGIN+r1*CELL;
-    ctx.fillStyle = lighten(COLORS[p], 0.55);
+    const col = COLORS[p], dark = DARKS[p];
+
+    // Área exterior: tinte suave con gradiente radial
+    const outerGrd = ctx.createRadialGradient(x+W/2, y+H/2, W*0.05, x+W/2, y+H/2, W*0.85);
+    outerGrd.addColorStop(0, lighten(col, 0.80));
+    outerGrd.addColorStop(1, lighten(col, 0.52));
+    ctx.fillStyle = outerGrd;
     ctx.fillRect(x, y, W, H);
-    const pad = CELL * 0.5;
-    ctx.fillStyle = lighten(COLORS[p], 0.2);
-    ctx.fillRect(x+pad, y+pad, W-2*pad, H-2*pad);
-    ctx.strokeStyle = DARKS[p]; ctx.lineWidth = 2;
-    ctx.strokeRect(x+pad, y+pad, W-2*pad, H-2*pad);
-    // Label
-    ctx.fillStyle = DARKS[p];
+    ctx.strokeStyle = lighten(col, 0.2);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, W, H);
+
+    // Plataforma interior elevada (con sombra y gradiente)
+    const pad = CELL * 0.42, ir = CELL * 0.28;
+    const iw = W - 2*pad, ih = H - 2*pad;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.40)';
+    ctx.shadowBlur = 9;
+    ctx.shadowOffsetY = 4;
+    const innerGrd = ctx.createLinearGradient(x+pad, y+pad, x+pad+iw, y+pad+ih);
+    innerGrd.addColorStop(0, lighten(col, 0.22));
+    innerGrd.addColorStop(1, col);
+    roundRect(ctx, x+pad, y+pad, iw, ih, ir);
+    ctx.fillStyle = innerGrd;
+    ctx.fill();
+    ctx.restore();
+
+    // Borde interior + reflejo
+    ctx.strokeStyle = dark;
+    ctx.lineWidth = 2;
+    roundRect(ctx, x+pad, y+pad, iw, ih, ir);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.38)';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, x+pad+1.5, y+pad+1.5, iw-3, ih-3, ir);
+    ctx.stroke();
+
+    // Etiqueta del color
+    ctx.fillStyle = dark;
     ctx.font = `bold ${Math.max(9, CELL*0.22)}px Arial`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    ctx.fillText(NAMES[p], x+W/2, y+4);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(NAMES[p], x+W/2, y+5);
   }
 
-  // Cross background
-  ctx.fillStyle = '#FAFAFA';
-  ctx.fillRect(MARGIN, MARGIN+6*CELL, 15*CELL, 3*CELL);
-  ctx.fillRect(MARGIN+6*CELL, MARGIN, 3*CELL, 15*CELL);
+  // ── Cruz de caminos ─────────────────────────────────────────────────────────
+  const crossGrd = ctx.createLinearGradient(BX, BY, BX+BW, BY+BH);
+  crossGrd.addColorStop(0, '#FDFAF4');
+  crossGrd.addColorStop(1, '#EDE4D2');
+  ctx.fillStyle = crossGrd;
+  ctx.fillRect(MARGIN,         MARGIN+6*CELL, 15*CELL, 3*CELL);
+  ctx.fillRect(MARGIN+6*CELL,  MARGIN,        3*CELL,  15*CELL);
 
-  // Home stretches
+  // ── Pasillos de llegada ─────────────────────────────────────────────────────
   for (let p = 0; p < 4; p++) {
-    for (const [r,c] of HOME_STRETCHES[p]) {
-      ctx.fillStyle = lighten(COLORS[p], 0.4);
-      ctx.fillRect(MARGIN+c*CELL, MARGIN+r*CELL, CELL, CELL);
-      ctx.strokeStyle = COLORS[p]; ctx.lineWidth = 1;
-      ctx.strokeRect(MARGIN+c*CELL, MARGIN+r*CELL, CELL, CELL);
+    const cells = HOME_STRETCHES[p];
+    for (let s = 0; s < cells.length; s++) {
+      const [row, col] = cells[s];
+      // Progresivo: más saturado cuanto más cerca del centro (s=4 es el último)
+      const t = s / (cells.length - 1);   // 0 → 1 (lejos → cerca)
+      const cellGrd = ctx.createLinearGradient(
+        MARGIN+col*CELL, MARGIN+row*CELL,
+        MARGIN+(col+1)*CELL, MARGIN+(row+1)*CELL
+      );
+      cellGrd.addColorStop(0, lighten(COLORS[p], 0.55 - t * 0.45));
+      cellGrd.addColorStop(1, lighten(COLORS[p], 0.35 - t * 0.35));
+      ctx.fillStyle = cellGrd;
+      ctx.fillRect(MARGIN+col*CELL, MARGIN+row*CELL, CELL, CELL);
+      ctx.strokeStyle = lighten(COLORS[p], 0.15);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(MARGIN+col*CELL, MARGIN+row*CELL, CELL, CELL);
     }
   }
 
-  // Center pinwheel
+  // ── Ruleta central ──────────────────────────────────────────────────────────
   const bx = MARGIN+6*CELL, by = MARGIN+6*CELL;
   const bx2 = MARGIN+9*CELL, by2 = MARGIN+9*CELL;
   const mx = (bx+bx2)/2, my = (by+by2)/2;
@@ -334,98 +495,126 @@ function renderBoard(canvas, gameState, overrides = {}) {
     [[mx,my],[bx,by],[bx,by2]],
   ];
   for (let i = 0; i < 4; i++) {
-    ctx.fillStyle = COLORS[i];
+    const [ex, ey] = [(tris[i][1][0]+tris[i][2][0])/2, (tris[i][1][1]+tris[i][2][1])/2];
+    const tGrd = ctx.createLinearGradient(mx, my, ex, ey);
+    tGrd.addColorStop(0, lighten(COLORS[i], 0.55));
+    tGrd.addColorStop(1, COLORS[i]);
+    ctx.fillStyle = tGrd;
     ctx.beginPath();
-    ctx.moveTo(tris[i][0][0],tris[i][0][1]);
-    ctx.lineTo(tris[i][1][0],tris[i][1][1]);
-    ctx.lineTo(tris[i][2][0],tris[i][2][1]);
-    ctx.closePath(); ctx.fill();
+    ctx.moveTo(tris[i][0][0], tris[i][0][1]);
+    ctx.lineTo(tris[i][1][0], tris[i][1][1]);
+    ctx.lineTo(tris[i][2][0], tris[i][2][1]);
+    ctx.closePath();
+    ctx.fill();
   }
-  // White lines between triangles
-  ctx.strokeStyle = 'white'; ctx.lineWidth = 2;
-  for (const tri of tris) { ctx.beginPath(); ctx.moveTo(tri[0][0],tri[0][1]); ctx.lineTo(tri[1][0],tri[1][1]); ctx.stroke(); ctx.beginPath(); ctx.moveTo(tri[0][0],tri[0][1]); ctx.lineTo(tri[2][0],tri[2][1]); ctx.stroke(); }
-  drawStar(ctx, mx, my, CELL*0.28, 'white');
+  ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+  ctx.lineWidth = 1.5;
+  for (const tri of tris) {
+    ctx.beginPath(); ctx.moveTo(tri[0][0],tri[0][1]); ctx.lineTo(tri[1][0],tri[1][1]); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tri[0][0],tri[0][1]); ctx.lineTo(tri[2][0],tri[2][1]); ctx.stroke();
+  }
+  // Estrella metálica central
+  ctx.save();
+  ctx.shadowColor = 'rgba(255,255,220,0.6)';
+  ctx.shadowBlur = 12;
+  drawStar(ctx, mx, my, CELL*0.32, 'white');
+  ctx.restore();
 
-  // Path squares
+  // ── Casillas del camino principal ───────────────────────────────────────────
   for (let i = 0; i < MAIN_PATH.length; i++) {
-    const [r,c] = MAIN_PATH[i];
-    const x = MARGIN+c*CELL, y = MARGIN+r*CELL;
+    const [row, col] = MAIN_PATH[i];
+    const x = MARGIN+col*CELL, y = MARGIN+row*CELL;
     const isStart = PLAYER_STARTS.indexOf(i);
+
     if (isStart >= 0) {
-      ctx.fillStyle = lighten(COLORS[isStart], 0.3);
+      const sg = ctx.createLinearGradient(x, y, x+CELL, y+CELL);
+      sg.addColorStop(0, lighten(COLORS[isStart], 0.50));
+      sg.addColorStop(1, lighten(COLORS[isStart], 0.25));
+      ctx.fillStyle = sg;
     } else if (SAFE.has(i)) {
-      ctx.fillStyle = '#FFFBE0';
+      ctx.fillStyle = '#FFFCE8';
     } else {
-      ctx.fillStyle = '#FAFAFA';
+      const cg = ctx.createLinearGradient(x, y, x+CELL, y+CELL);
+      cg.addColorStop(0, '#FDFAF4');
+      cg.addColorStop(1, '#ECE4D2');
+      ctx.fillStyle = cg;
     }
     ctx.fillRect(x, y, CELL, CELL);
-    ctx.strokeStyle = '#CCCCCC'; ctx.lineWidth = 0.5;
+    ctx.strokeStyle = '#C8BAA0';
+    ctx.lineWidth = 0.5;
     ctx.strokeRect(x, y, CELL, CELL);
-    if (SAFE.has(i)) drawStar(ctx, x+CELL/2, y+CELL/2, CELL*0.2, '#FFD700');
-    if (isStart >= 0) drawStar(ctx, x+CELL/2, y+CELL/2, CELL*0.2, COLORS[isStart]);
+
+    if (SAFE.has(i))   drawStarGlow(ctx, x+CELL/2, y+CELL/2, CELL*0.19, '#FFD000');
+    if (isStart >= 0)  drawStarGlow(ctx, x+CELL/2, y+CELL/2, CELL*0.19, COLORS[isStart]);
   }
 
-  // Home slots (empty circles)
+  // ── Ranuras de casa (círculos hundidos) ─────────────────────────────────────
   for (let p = 0; p < 4; p++) {
-    for (const [r,c] of HOME_SLOTS[p]) {
+    for (const [row, col] of HOME_SLOTS[p]) {
+      const scx = ccx(row, col), scy = ccy(row, col);
+      const sr = CELL * 0.33;
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.45)';
+      ctx.shadowBlur = 5;
+      ctx.shadowOffsetY = 2;
+      const slotGrd = ctx.createRadialGradient(scx-sr*0.2, scy-sr*0.2, sr*0.1, scx, scy, sr);
+      slotGrd.addColorStop(0, '#C0B8B0');
+      slotGrd.addColorStop(1, '#8A8080');
       ctx.beginPath();
-      ctx.arc(cx(r,c), cy(r,c), CELL*0.33, 0, Math.PI*2);
-      ctx.fillStyle = '#CCCCCC'; ctx.fill();
-      ctx.strokeStyle = COLORS[p]; ctx.lineWidth = 2; ctx.stroke();
+      ctx.arc(scx, scy, sr, 0, Math.PI*2);
+      ctx.fillStyle = slotGrd;
+      ctx.fill();
+      ctx.restore();
+
+      ctx.strokeStyle = COLORS[p];
+      ctx.lineWidth = Math.max(2, CELL * 0.09);
+      ctx.beginPath();
+      ctx.arc(scx, scy, sr, 0, Math.PI*2);
+      ctx.stroke();
+
+      // Pequeño reflejo interior
+      ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(scx - sr*0.1, scy - sr*0.15, sr * 0.55, Math.PI * 1.05, Math.PI * 1.75);
+      ctx.stroke();
     }
   }
 
   if (!gameState) return;
 
-  // Pieces (con soporte de overrides para animación)
+  // ── Fichas ──────────────────────────────────────────────────────────────────
+  const cp = gameState.current_player;
+  const validSet = new Set(gameState.valid_moves || []);
+
   const cellMap = {};
   const numPlayers = gameState.player_ids.length;
   for (let p = 0; p < numPlayers; p++) {
     for (let i = 0; i < 4; i++) {
       const piece = gameState.pieces[p][i];
       const overrideKey = `${p}_${i}`;
-      const [r,c] = overrides[overrideKey] || getPieceCell(p, piece);
-      const key = `${r},${c}`;
+      const [row, col] = overrides[overrideKey] || getPieceCell(p, piece);
+      const key = `${row},${col}`;
       if (!cellMap[key]) cellMap[key] = [];
-      cellMap[key].push({p, piece, isAnimating: !!overrides[overrideKey]});
+      cellMap[key].push({ p, piece, isAnimating: !!overrides[overrideKey] });
     }
   }
 
   for (const [key, group] of Object.entries(cellMap)) {
-    const [r,c] = key.split(',').map(Number);
-    const bcx = cx(r,c), bcy = cy(r,c);
+    const [row, col] = key.split(',').map(Number);
+    const bcx = ccx(row, col), bcy = ccy(row, col);
     const count = group.length;
-    const pr = count > 1 ? CELL*0.22 : CELL*0.28;
+    const pr  = count > 1 ? CELL*0.21 : CELL*0.29;
     const offs = [[0,0],[-CELL*0.22,-CELL*0.22],[CELL*0.22,-CELL*0.22],[-CELL*0.22,CELL*0.22],[CELL*0.22,CELL*0.22]];
 
     for (let i = 0; i < group.length; i++) {
-      const {p, piece, isAnimating} = group[i];
-      const [ox,oy] = count>1 ? offs[i+1]||[0,0] : [0,0];
-      const pcx = bcx+ox, pcy = bcy+oy;
-      const animR = isAnimating ? pr * 1.15 : pr; // ligeramente más grande al moverse
-
-      // Glow si está animando
-      if (isAnimating) {
-        ctx.save();
-        ctx.shadowColor = COLORS[p];
-        ctx.shadowBlur = 18;
-      }
-      // Shadow
-      ctx.beginPath(); ctx.arc(pcx+2, pcy+2, animR, 0, Math.PI*2);
-      ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill();
-      // Body
-      ctx.beginPath(); ctx.arc(pcx, pcy, animR, 0, Math.PI*2);
-      ctx.fillStyle = COLORS[p]; ctx.fill();
-      ctx.strokeStyle = DARKS[p]; ctx.lineWidth = Math.max(1.5, CELL*0.05); ctx.stroke();
-      // Highlight
-      ctx.beginPath(); ctx.arc(pcx-animR*0.28, pcy-animR*0.28, animR*0.32, 0, Math.PI*2);
-      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fill();
-      // Number
-      ctx.fillStyle = 'white';
-      ctx.font = `bold ${Math.max(8,Math.floor(animR*1.1))}px Arial`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(piece.idx+1, pcx, pcy);
-      if (isAnimating) ctx.restore();
+      const { p, piece, isAnimating } = group[i];
+      const [ox, oy] = count > 1 ? offs[i+1] || [0,0] : [0,0];
+      const pcx = bcx + ox, pcy = bcy + oy;
+      const pieceR = isAnimating ? pr * 1.18 : pr;
+      const isValid = gameState.phase === 'moving' && p === cp && validSet.has(piece.idx);
+      drawPiece3D(ctx, pcx, pcy, pieceR, COLORS[p], DARKS[p], piece.idx+1, isAnimating, isValid);
     }
   }
 }
