@@ -215,6 +215,10 @@ let _sfxMuted = false;
 function toggleMute() {
   _sfxMuted = !_sfxMuted;
   document.getElementById('btn-mute').textContent = _sfxMuted ? '🔇' : '🔊';
+  if (_bgAudio) {
+    if (_sfxMuted) { _bgAudio.pause(); }
+    else { _bgAudio.play().catch(() => {}); }
+  }
 }
 
 const SFX = (() => {
@@ -367,6 +371,97 @@ const SFX = (() => {
     victory()   { play('victory');   },
   };
 })();
+
+// ── Música de fondo (chiptune loop) ──────────────────────────────────────────
+// Oda a la Alegría — Beethoven (dominio público) renderizada como WAV en memoria
+let _bgAudio = null;
+
+(function buildBgMusic() {
+  try {
+    const SR  = 22050;
+    const BPM = 152;
+    const E8  = 60 / BPM / 2;   // corchea en segundos (~0.197 s)
+
+    const G4=392.00, C5=523.25, D5=587.33,
+          E5=659.25, F5=698.46, G5=783.99;
+
+    // Secuencia completa: [frecuencia, duración_en_corcheas]
+    // 16 compases × 8 corcheas = 128 corcheas ≈ 25 s de loop
+    const seq = [
+      // ── Frase 1 (compases 1-4) ──────────────────────────────────────────
+      [E5,2],[E5,2],[F5,2],[G5,2],
+      [G5,2],[F5,2],[E5,2],[D5,2],
+      [C5,2],[C5,2],[D5,2],[E5,2],
+      [E5,3],[D5,1],[D5,4],
+      // ── Frase 2 (compases 5-8) ──────────────────────────────────────────
+      [E5,2],[E5,2],[F5,2],[G5,2],
+      [G5,2],[F5,2],[E5,2],[D5,2],
+      [C5,2],[C5,2],[D5,2],[E5,2],
+      [D5,3],[C5,1],[C5,4],
+      // ── Frase 3 (compases 9-12) ─────────────────────────────────────────
+      [D5,2],[D5,2],[E5,2],[C5,2],
+      [D5,2],[E5,1],[F5,1],[E5,2],[C5,2],
+      [D5,2],[E5,1],[F5,1],[E5,2],[D5,2],
+      [C5,2],[D5,2],[G4,4],
+      // ── Frase 4 (compases 13-16) ────────────────────────────────────────
+      [E5,2],[E5,2],[F5,2],[G5,2],
+      [G5,2],[F5,2],[E5,2],[D5,2],
+      [C5,2],[C5,2],[D5,2],[E5,2],
+      [D5,3],[C5,1],[C5,4],
+    ];
+
+    // Calcular tamaño total del buffer
+    const totalS = Math.ceil(seq.reduce((s,[,d]) => s + d * E8, 0) * SR) + 512;
+    const pcm = new Float32Array(totalS);
+
+    // Renderizar cada nota como onda triangular (sonido chiptune Game Boy)
+    let t = 0;
+    for (const [freq, beats] of seq) {
+      const noteDur = beats * E8 * 0.86;  // 14% de silencio entre notas
+      const i0  = Math.floor(t * SR);
+      const len = Math.floor(noteDur * SR);
+      for (let i = 0; i < len; i++) {
+        if (i0 + i >= pcm.length) break;
+        const p   = i / len;
+        // Envolvente: attack 4%, sustain, release 28%
+        const env = p < 0.04 ? p / 0.04 : p > 0.72 ? (1 - p) / 0.28 : 1.0;
+        // Onda triangular
+        const ph  = (freq * i / SR) % 1;
+        pcm[i0+i] += (ph < 0.5 ? 4*ph - 1 : 3 - 4*ph) * 0.42 * Math.max(0, env);
+      }
+      t += beats * E8;
+    }
+
+    // Normalizar a 0.88 de amplitud máxima
+    let mx = 0;
+    for (let i = 0; i < pcm.length; i++) mx = Math.max(mx, Math.abs(pcm[i]));
+    const gain = mx > 0 ? 0.88 / mx : 1;
+
+    // Empaquetar como WAV
+    const wb = new ArrayBuffer(44 + pcm.length * 2);
+    const dv = new DataView(wb);
+    const ws = (o, x) => { for (let i = 0; i < x.length; i++) dv.setUint8(o+i, x.charCodeAt(i)); };
+    ws(0,'RIFF'); dv.setUint32(4, 36+pcm.length*2, true);
+    ws(8,'WAVE'); ws(12,'fmt ');
+    dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+    dv.setUint32(24,SR,true); dv.setUint32(28,SR*2,true);
+    dv.setUint16(32,2,true);  dv.setUint16(34,16,true);
+    ws(36,'data'); dv.setUint32(40, pcm.length*2, true);
+    for (let i = 0; i < pcm.length; i++)
+      dv.setInt16(44+i*2, Math.max(-1, Math.min(1, pcm[i]*gain)) * 32767, true);
+
+    const url = URL.createObjectURL(new Blob([wb], { type:'audio/wav' }));
+    _bgAudio = new Audio(url);
+    _bgAudio.loop   = true;
+    _bgAudio.volume = 0.28;
+  } catch(e) { console.warn('Music build error:', e); }
+})();
+
+function startMusic() {
+  if (_bgAudio && !_sfxMuted && _bgAudio.paused) {
+    _bgAudio.play().catch(() => {});
+  }
+}
 
 // ── Animación de movimiento de fichas ─────────────────────────────────────────
 // pieceOverrides: { 'p_idx': [r, c] } — posición temporal durante animación
@@ -1035,7 +1130,7 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.add('hidden'), 3000);
 }
 
-// ── Init: leer ?game= de la URL ───────────────────────────────────────────────
+// ── Init: leer ?game= de la URL + arrancar música en primer gesto ─────────────
 (function init() {
   const params = new URLSearchParams(location.search);
   const gameParam = params.get('game');
@@ -1043,4 +1138,14 @@ function toast(msg) {
     document.getElementById('join-code').value = gameParam;
     joinGame();
   }
+
+  // Los navegadores móviles bloquean el autoplay hasta que hay un gesto del usuario.
+  // Iniciamos la música en el primer click o touch de la página.
+  function onFirstGesture() {
+    startMusic();
+    document.removeEventListener('click',      onFirstGesture);
+    document.removeEventListener('touchstart', onFirstGesture);
+  }
+  document.addEventListener('click',      onFirstGesture, { passive: true });
+  document.addEventListener('touchstart', onFirstGesture, { passive: true });
 })();
