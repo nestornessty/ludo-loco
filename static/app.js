@@ -1073,7 +1073,7 @@ function startLobbyDice() {
   const CF = [
     { v:[4,5,6,7], n:1, nm:[ 0, 0, 1] },
     { v:[1,0,3,2], n:6, nm:[ 0, 0,-1] },
-    { v:[4,0,1,5], n:2, nm:[ 0,-1, 0] },
+    { v:[0,1,5,4], n:2, nm:[ 0,-1, 0] },
     { v:[7,6,2,3], n:5, nm:[ 0, 1, 0] },
     { v:[0,4,7,3], n:3, nm:[-1, 0, 0] },
     { v:[5,1,2,6], n:4, nm:[ 1, 0, 0] },
@@ -1085,7 +1085,7 @@ function startLobbyDice() {
     return [x2, y1, z2];
   }
   function proj([x,y,z]) {
-    const sc = S * 0.27 * 5 / (5 + z + 1.5);
+    const sc = S * 0.27 * 5 / (6.5 - z);
     return [CX + x*sc, CY + y*sc, z];
   }
 
