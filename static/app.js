@@ -372,12 +372,34 @@ const SFX = (() => {
   };
 })();
 
-// ── Música de fondo (reggaeton loop) ─────────────────────────────────────────
+// ── Playlist de música de fondo ───────────────────────────────────────────────
+const _playlist = [
+  '/music.webm',
+  '/track1.webm', '/track2.webm', '/track3.webm', '/track4.webm', '/track5.webm',
+  '/track1_b.webm', '/track2_b.webm', '/track3_b.webm', '/track4_b.webm',
+];
+// Mezclar aleatoriamente al cargar
+for (let i = _playlist.length - 1; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  [_playlist[i], _playlist[j]] = [_playlist[j], _playlist[i]];
+}
+let _bgIdx   = 0;
 let _bgAudio = null;
+
+function _loadNextTrack() {
+  _bgIdx = (_bgIdx + 1) % _playlist.length;
+  _bgAudio = new Audio(_playlist[_bgIdx]);
+  _bgAudio.volume = 0.25;
+  _bgAudio.addEventListener('ended', _loadNextTrack);
+  _bgAudio.addEventListener('error', _loadNextTrack);
+  if (!_sfxMuted) _bgAudio.play().catch(() => {});
+}
+
 try {
-  _bgAudio = new Audio('/music.webm');
-  _bgAudio.loop   = true;
-  _bgAudio.volume = 0.45;
+  _bgAudio = new Audio(_playlist[0]);
+  _bgAudio.volume = 0.25;
+  _bgAudio.addEventListener('ended', _loadNextTrack);
+  _bgAudio.addEventListener('error', _loadNextTrack);
 } catch(e) { console.warn('Music load error:', e); }
 
 function startMusic() {
