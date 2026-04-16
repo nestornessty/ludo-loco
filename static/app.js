@@ -1056,8 +1056,109 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.add('hidden'), 3000);
 }
 
+// ── Dado 3D animado en lobby ──────────────────────────────────────────────────
+function startLobbyDice() {
+  const canvas = document.getElementById('lobby-dice-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const S = canvas.width;
+  const CX = S / 2, CY = S / 2;
+
+  // Vértices del cubo unidad
+  const V = [
+    [-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],
+    [-1,-1, 1],[1,-1, 1],[1,1, 1],[-1,1, 1]
+  ];
+  // Caras: índices de vértices (TL,TR,BR,BL desde fuera), número de dado, normal
+  const CF = [
+    { v:[4,5,6,7], n:1, nm:[ 0, 0, 1] },
+    { v:[1,0,3,2], n:6, nm:[ 0, 0,-1] },
+    { v:[4,0,1,5], n:2, nm:[ 0,-1, 0] },
+    { v:[7,6,2,3], n:5, nm:[ 0, 1, 0] },
+    { v:[0,4,7,3], n:3, nm:[-1, 0, 0] },
+    { v:[5,1,2,6], n:4, nm:[ 1, 0, 0] },
+  ];
+
+  function rotVec([x,y,z], rx, ry) {
+    const y1 = y*Math.cos(rx) - z*Math.sin(rx), z1 = y*Math.sin(rx) + z*Math.cos(rx);
+    const x2 = x*Math.cos(ry) + z1*Math.sin(ry), z2 = -x*Math.sin(ry) + z1*Math.cos(ry);
+    return [x2, y1, z2];
+  }
+  function proj([x,y,z]) {
+    const sc = S * 0.27 * 5 / (5 + z + 1.5);
+    return [CX + x*sc, CY + y*sc, z];
+  }
+
+  let angle = 0;
+  const RX = 0.45;
+
+  function frame() {
+    angle += 0.011;
+    const rotV = V.map(v => rotVec(v, RX, angle));
+
+    // Calcular caras visibles (normal z > 0) y ordenar de atrás a delante
+    const faces = CF.map(f => {
+      const nr = rotVec(f.nm, RX, angle);
+      const avgZ = f.v.reduce((s,i) => s + rotV[i][2], 0) / 4;
+      return { ...f, nz: nr[2], avgZ, pts: f.v.map(i => proj(rotV[i])) };
+    }).filter(f => f.nz > 0).sort((a,b) => a.avgZ - b.avgZ);
+
+    ctx.clearRect(0, 0, S, S);
+
+    for (const f of faces) {
+      const [tl, tr, br, bl] = f.pts;
+
+      // Polígono de la cara
+      ctx.beginPath();
+      ctx.moveTo(tl[0],tl[1]); ctx.lineTo(tr[0],tr[1]);
+      ctx.lineTo(br[0],br[1]); ctx.lineTo(bl[0],bl[1]);
+      ctx.closePath();
+
+      // Sombra solo en la cara de fondo
+      ctx.shadowColor = 'rgba(0,0,0,0.45)';
+      ctx.shadowBlur  = 10;
+      ctx.shadowOffsetY = 4;
+
+      // Degradado de cara según iluminación
+      const bv = Math.round(200 + f.nz * 55);
+      const bd = Math.round(bv * 0.78);
+      const g = ctx.createLinearGradient(tl[0],tl[1], br[0],br[1]);
+      g.addColorStop(0, `rgb(${bv},${bv},${bv})`);
+      g.addColorStop(1, `rgb(${bd},${bd},${bd})`);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = '#aaa';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+
+      // Puntos usando mapeo afín de la cara al espacio de pantalla
+      const bx = [tr[0]-tl[0], tr[1]-tl[1]];
+      const by = [bl[0]-tl[0], bl[1]-tl[1]];
+      const faceW = Math.hypot(bx[0], bx[1]);
+      const dr = faceW * 0.092;
+
+      for (const [px, py] of DOT_POS[f.n]) {
+        const sx = tl[0] + bx[0]*px + by[0]*py;
+        const sy = tl[1] + bx[1]*px + by[1]*py;
+        const dg = ctx.createRadialGradient(sx-dr*0.3, sy-dr*0.3, dr*0.05, sx, sy, dr);
+        dg.addColorStop(0, '#555');
+        dg.addColorStop(1, '#111');
+        ctx.beginPath();
+        ctx.arc(sx, sy, dr, 0, Math.PI*2);
+        ctx.fillStyle = dg;
+        ctx.fill();
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+}
+
 // ── Init: leer ?game= de la URL + arrancar música en primer gesto ─────────────
 (function init() {
+  startLobbyDice();
+
   const params = new URLSearchParams(location.search);
   const gameParam = params.get('game');
   if (gameParam) {
