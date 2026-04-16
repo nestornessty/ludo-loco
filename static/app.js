@@ -149,6 +149,7 @@ function showDice3D(result, callback) {
   label.classList.remove('show');
   label.textContent = '';
   overlay.classList.remove('hidden');
+  SFX.dice();  // sonido sincronizado con la animación
 
   // Parámetros de animación
   const SPIN_MS   = 1100;   // duración del giro rápido
@@ -206,6 +207,178 @@ function showDice3D(result, callback) {
   rafId = requestAnimationFrame(animate);
 }
 
+// ── Efectos de sonido (Web Audio API — sin archivos externos) ─────────────────
+let _sfxMuted = false;
+
+function toggleMute() {
+  _sfxMuted = !_sfxMuted;
+  document.getElementById('btn-mute').textContent = _sfxMuted ? '🔇' : '🔊';
+}
+
+const SFX = (() => {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  let ctx = null;
+
+  // Inicializa/reanuda el contexto (requiere gesto del usuario — siempre se llama desde click)
+  function ac() {
+    if (!AC) return null;
+    if (!ctx) ctx = new AC();
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+
+  // Oscilador simple con envolvente de amplitud
+  function tone(freq, type, t, dur, vol = 0.28, freqEnd = null) {
+    const a = ac(); if (!a) return;
+    const osc = a.createOscillator();
+    const g   = a.createGain();
+    osc.connect(g); g.connect(a.destination);
+    osc.type = type;
+    const now = a.currentTime + t;
+    osc.frequency.setValueAtTime(freq, now);
+    if (freqEnd) osc.frequency.exponentialRampToValueAtTime(freqEnd, now + dur);
+    g.gain.setValueAtTime(vol, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    osc.start(now);
+    osc.stop(now + dur + 0.05);
+  }
+
+  // Ruido blanco filtrado (ideal para impactos y whooshes)
+  function noise(t, dur, vol = 0.15, fCenter = 1000, q = 0.8) {
+    const a = ac(); if (!a) return;
+    const samples = Math.ceil(a.sampleRate * dur);
+    const buf = a.createBuffer(1, samples, a.sampleRate);
+    const d   = buf.getChannelData(0);
+    for (let i = 0; i < samples; i++) d[i] = Math.random() * 2 - 1;
+    const src  = a.createBufferSource();
+    src.buffer = buf;
+    const filt = a.createBiquadFilter();
+    filt.type = 'bandpass';
+    filt.frequency.value = fCenter;
+    filt.Q.value = q;
+    const g = a.createGain();
+    const now = a.currentTime + t;
+    g.gain.setValueAtTime(vol, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(filt); filt.connect(g); g.connect(a.destination);
+    src.start(now); src.stop(now + dur + 0.05);
+  }
+
+  return {
+
+    // 🎲 Dado rodando — clics acelerados + impacto final al aterrizar
+    dice() {
+      if (_sfxMuted) return;
+      try {
+        // Repiqueteo del dado (rápido al inicio, lento al final)
+        [0, 0.06, 0.11, 0.17, 0.25, 0.36, 0.50, 0.65, 0.78].forEach((t, i) => {
+          noise(t, 0.055, 0.14 - i * 0.012, 900, 1.2);
+          tone(280 + i * 18, 'sine', t, 0.045, 0.08);
+        });
+        // IMPACTO al parar
+        noise(0.88, 0.14, 0.38, 280, 0.5);
+        tone(100, 'sine', 0.88, 0.28, 0.42, 50);
+        tone(200, 'sine', 0.90, 0.20, 0.22, 70);
+      } catch(e) {}
+    },
+
+    // 👣 Paso de ficha — click corto y limpio
+    step() {
+      if (_sfxMuted) return;
+      try {
+        noise(0, 0.038, 0.08, 1100, 1.5);
+        tone(620, 'sine', 0, 0.038, 0.07);
+      } catch(e) {}
+    },
+
+    // 🚀 Ficha sale de casa — whoosh ascendente + chispa
+    exitHome() {
+      if (_sfxMuted) return;
+      try {
+        tone(140, 'sawtooth', 0,    0.28, 0.22, 1500);
+        noise(0,              0.28, 0.13, 700,  0.6);
+        tone(1046, 'sine',    0.20, 0.28, 0.32);
+        tone(1318, 'sine',    0.26, 0.22, 0.22);
+      } catch(e) {}
+    },
+
+    // 💥 CAPTURA — explosión grave + crack + eco
+    capture() {
+      if (_sfxMuted) return;
+      try {
+        // Sub-bass BOOM
+        tone(75,  'sine',     0,    0.55, 0.58, 22);
+        tone(48,  'sine',     0,    0.60, 0.44, 18);
+        // Crack de alta frecuencia
+        noise(0,              0.09, 0.60, 6000, 0.5);
+        noise(0.04,           0.13, 0.38, 1200, 0.7);
+        // Distorsión metálica
+        tone(280, 'sawtooth', 0,    0.18, 0.32, 45);
+        tone(190, 'square',   0,    0.16, 0.26, 38);
+        // Eco grave tardío
+        tone(55,  'sine',     0.18, 0.38, 0.28, 18);
+        noise(0.22,           0.28, 0.18, 350,  0.6);
+      } catch(e) {}
+    },
+
+    // 🎯 Ficha llega al centro — arpeggio brillante
+    pieceHome() {
+      if (_sfxMuted) return;
+      try {
+        [[523,0],[659,0.10],[784,0.20],[1047,0.30]].forEach(([f, t]) => {
+          tone(f,     'sine',     t, 0.42, 0.33);
+          tone(f * 2, 'sine',     t, 0.14, 0.14);
+          tone(f * 1.5,'triangle',t, 0.10, 0.10);
+        });
+        noise(0.38, 0.18, 0.13, 3500, 0.5);
+        tone(2093,  'sine', 0.40, 0.22, 0.20);
+      } catch(e) {}
+    },
+
+    // 🔄 Turno extra — subida rápida de 4 notas
+    extraTurn() {
+      if (_sfxMuted) return;
+      try {
+        tone(523,  'sine', 0,    0.10, 0.22);
+        tone(659,  'sine', 0.09, 0.10, 0.22);
+        tone(784,  'sine', 0.18, 0.12, 0.26);
+        tone(1046, 'sine', 0.27, 0.18, 0.24);
+      } catch(e) {}
+    },
+
+    // 🏆 VICTORIA — fanfarria épica con fuegos artificiales
+    victory() {
+      if (_sfxMuted) return;
+      try {
+        // Melodía principal (estilo fanfarria militar)
+        [
+          [523, 0,    0.12],
+          [523, 0.13, 0.12],
+          [523, 0.26, 0.12],
+          [415, 0.39, 0.20],
+          [523, 0.58, 0.44],
+          [415, 0.98, 0.20],
+          [523, 1.16, 0.85],
+        ].forEach(([f, t, d]) => {
+          tone(f,       'triangle', t, d,       0.40);
+          tone(f * 1.5, 'sine',     t, d * 0.8, 0.18);
+          tone(f * 2,   'sine',     t, d * 0.6, 0.11);
+        });
+        // Sub-bass de poder
+        tone(65, 'sine', 0, 0.45, 0.38, 38);
+        // Fuegos artificiales (chispas aleatorias)
+        [0.5, 0.85, 1.15, 1.45, 1.75, 2.0].forEach((t, i) => {
+          noise(t, 0.14, 0.22, 2000 + i * 600, 0.5);
+        });
+        // Subida final victoriosa
+        [[784,1.85],[880,1.95],[988,2.05],[1047,2.15],[1318,2.28]].forEach(([f, t]) => {
+          tone(f, 'sine', t, 0.28, 0.30);
+        });
+      } catch(e) {}
+    },
+  };
+})();
+
 // ── Animación de movimiento de fichas ─────────────────────────────────────────
 // pieceOverrides: { 'p_idx': [r, c] } — posición temporal durante animación
 const pieceOverrides = {};
@@ -221,7 +394,8 @@ function getPosCell(player, pos, pieceIdx) {
 function animatePieceMove(player, pieceIdx, fromPos, toPos, canvas, state, callback) {
   // Construir lista de posiciones intermedias
   const cells = [];
-  if (fromPos === -1) {
+  const exitingHome = fromPos === -1;
+  if (exitingHome) {
     cells.push(HOME_SLOTS[player][pieceIdx]);
     cells.push(MAIN_PATH[PLAYER_STARTS[player]]);
   } else {
@@ -236,6 +410,9 @@ function animatePieceMove(player, pieceIdx, fromPos, toPos, canvas, state, callb
   let step = 0;
   animating = true;
 
+  // Sonido de salida de casa en el primer paso
+  if (exitingHome) SFX.exitHome();
+
   function nextStep() {
     step++;
     if (step >= cells.length) {
@@ -246,7 +423,9 @@ function animatePieceMove(player, pieceIdx, fromPos, toPos, canvas, state, callb
     }
     pieceOverrides[key] = cells[step];
     renderBoard(canvas, state, pieceOverrides);
-    // Vibración suave en Telegram
+    // Click por cada casilla (no en salida de casa — ya tiene su propio sonido)
+    if (!exitingHome || step > 1) SFX.step();
+    // Vibración háptica en Telegram
     if (tg && step % 3 === 0) tg.HapticFeedback?.impactOccurred('light');
     setTimeout(nextStep, 160);
   }
@@ -827,9 +1006,18 @@ async function movePiece(idx) {
     animatePieceMove(cp, idx, fromPos, toPos, canvas, gameState, () => {
       gameState = data;
       const ev = data.events || {};
-      if (ev.captured) toast('💥 ¡Captura! +8 LULOCO');
-      else if (ev.piece_finished) toast('🎯 ¡Ficha al centro! +12 LULOCO');
-      else if (ev.extra_turn) toast('🔄 ¡Turno extra!');
+      if (ev.captured) {
+        SFX.capture();
+        toast('💥 ¡Captura! +8 LULOCO');
+        if (tg) tg.HapticFeedback?.notificationOccurred('error');
+      } else if (ev.piece_finished) {
+        SFX.pieceHome();
+        toast('🎯 ¡Ficha al centro! +12 LULOCO');
+        if (tg) tg.HapticFeedback?.notificationOccurred('success');
+      } else if (ev.extra_turn) {
+        SFX.extraTurn();
+        toast('🔄 ¡Turno extra!');
+      }
       updateGameUI();
     });
   } catch(e) {
@@ -843,6 +1031,8 @@ function showEnd(msg) {
   const wName = msg.winner_name || gameState?.player_names?.[msg.winner] || '?';
   document.getElementById('end-winner').textContent = `¡${wName} gana!`;
   document.getElementById('end-detail').textContent = '+100 LULOCO ganados 🎉';
+  SFX.victory();
+  if (tg) tg.HapticFeedback?.notificationOccurred('success');
   showScreen('screen-end');
 }
 

@@ -164,7 +164,23 @@ html, body {
   background: #110800;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
+.btn-mute {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.btn-mute:active { background: rgba(255,255,255,0.18); }
 
 .status-bar {
   font-size: 14px;
